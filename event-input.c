@@ -1652,13 +1652,27 @@ enum {
 	//            bit difficult since the file descriptors are not
 	//            made available to callback functions..
 
-	Xl = (Xmin*9 + Xmax*1)/10,
-	Xm = (Xmin*5 + Xmax*5)/10,
-	Xh = (Xmin*1 + Xmax*9)/10,
+	// common "small step" size = width/10
+	Ss = (Xmax - Xmin) / 10,
 
-	Yl = (Ymin*9 + Ymax*1)/10,
-	Ym = (Ymin*5 + Ymax*5)/10,
-	Yh = (Ymin*1 + Ymax*9)/10,
+	// common "large step" size = half of width - small step
+	Sl = (Xmax - Xmin) / 2 - Ss,
+
+	// low-middle-high horizontal limits
+	Xl = Xmin + Ss,
+	Xh = Xmax - Ss,
+	Xm = (Xl + Xh) / 2,
+
+	// low-middle-high vertical limits
+	Yl = Ymin + Ss,
+	Yh = Ymax - Ss,
+	Ym = (Yl + Yh) / 2,
+
+	// vertical limit for top-down swipe
+	Yt = Yl + Sl,
+
+	// vertical limit for bottom-up swipe
+	Yb = Yh - Sl,
 };
 
 /** State machine for turning touch events into gesture actions */
@@ -1897,13 +1911,14 @@ gesture_update(gesture_t *self, int x, int y)
 
 	float score = gesture_eval_score(self, &tp, &ip);
 
+	if( !gesture_close_to(self, &self->touch, &tp) ) {
+		self->active = false;
+		mce_log(LL_DEBUG, "too far from last");
+		goto EXIT;
+	}
+
 	if( score < self->score ) {
 		mce_log(LL_DEBUG, "score %g vs %g", score, self->score);
-
-		if( !gesture_close_to(self, &self->touch, &tp) ) {
-			self->active = false;
-			mce_log(LL_DEBUG, "too far from last");
-		}
 		goto EXIT;
 	}
 
@@ -1936,8 +1951,8 @@ gesture_finish(gesture_t *self)
 	if( !self->active )
 		goto EXIT;
 
-	if( !gesture_in_area(self, &self->end, &self->touch) ) {
-		mce_log(LL_DEBUG, "too far from end");
+	if( self->score < 1.0f ) {
+		mce_log(LL_DEBUG, "end point not crossed");
 		goto EXIT;
 	}
 
@@ -1980,36 +1995,32 @@ static void gesture_action_unblank_cb(void)
 /** Array of gesture tracking state machines */
 static gesture_t gestures_lut[] =
 {
-
-	// horiz
 	{
-		.name = "HORZ: W -> E",
+		.name = "left-to-right",
 		.notify = gesture_action_unlock_cb,
 		.beg = { Xl,Ym },
-		.end = { Xh,Ym },
+		.end = { Xm,Ym },
 		.area = { 0.10f, 0.30f },
 	},
 	{
-		.name = "HORZ: E -> W",
+		.name = "right-to-left",
 		.notify = gesture_action_unlock_cb,
 		.beg = { Xh,Ym },
-		.end = { Xl,Ym },
+		.end = { Xm,Ym },
 		.area = { 0.10f, 0.30f },
 	},
-
-	// vert
 	{
-		.name = "VERT: N -> S",
-		.notify = gesture_action_unlock_cb,
+		.name = "top-down",
+		.notify = gesture_action_unblank_cb,
 		.beg = { Xm,Yl },
-		.end = { Xm,Yh },
+		.end = { Xm,Yt },
 		.area = { 0.30f, 0.10f },
 	},
 	{
-		.name = "VERT: S -> N",
+		.name = "bottom-up",
 		.notify = gesture_action_unlock_cb,
 		.beg = { Xm,Yh },
-		.end = { Xm,Yl },
+		.end = { Xm,Yb },
 		.area = { 0.30f, 0.10f },
 	},
 };
