@@ -1980,35 +1980,6 @@ static void gesture_action_unblank_cb(void)
 /** Array of gesture tracking state machines */
 static gesture_t gestures_lut[] =
 {
-	// diagonal
-	{
-		.name = "DIAG: NW -> SE",
-		.notify = gesture_action_unblank_cb,
-		.beg = { Xl,Yl },
-		.end = { Xh,Yh },
-		.area = { 0.10f, 0.10f },
-	},
-	{
-		.name = "DIAG: SE -> NW",
-		.notify = gesture_action_unblank_cb,
-		.beg = { Xh,Yh },
-		.end = { Xl,Yl },
-		.area = { 0.10f, 0.10f },
-	},
-	{
-		.name = "DIAG: NE -> SW",
-		.notify = gesture_action_unblank_cb,
-		.beg = { Xh,Yl },
-		.end = { Xl,Yh },
-		.area = { 0.10f, 0.10f },
-	},
-	{
-		.name = "DIAG: SW -> NE",
-		.notify = gesture_action_unblank_cb,
-		.beg = { Xl,Yh },
-		.end = { Xh,Yl },
-		.area = { 0.10f, 0.10f },
-	},
 
 	// horiz
 	{
