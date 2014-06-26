@@ -43,6 +43,9 @@
 /** Path to the touch unblock delay setting */
 #define MCE_GCONF_TOUCH_UNBLOCK_DELAY_PATH MCE_GCONF_EVENT_INPUT_PATH "/touch_unblock_delay"
 
+/** Path to the lpm gesture setting */
+#define MCE_GCONF_LPM_GESTURES_ENABLED_PATH MCE_GCONF_EVENT_INPUT_PATH "/lpm_gestures_enabled"
+
 /**
  * Delay between I/O monitoring setups and keypress repeats; 1 second
  */

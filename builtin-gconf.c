@@ -1291,6 +1291,12 @@ static const setting_t gconf_defaults[] =
     .def  = "100",
   },
   {
+    // MCE_GCONF_LPM_GESTURES_ENABLED_PATH  @ event-input.h
+    .key  = "/system/osso/dsm/event_input/lpm_gestures_enabled",
+    .type = "b",
+    .def  = "true",
+  },
+  {
     // MCE_LED_PATTERN_BATTERY_CHARGING @ mce.h
     .key  = "/system/osso/dsm/leds/PatternBatteryCharging",
     .type = "b",
