@@ -1645,36 +1645,107 @@ static inline void pnt2_sub(pnt2_t *r, const pnt2_t *a, const pnt2_t *b)
 	r->x = x, r->y = y;
 }
 
-/** Display geometry constants */
+/** Display geometry constants
+ *
+ * The GESTURE_(X|Y)_(MIN|MID_MAX) coordinates are used as
+ * possible gesture start points, marked with asterisk (*).
+ *
+ * Gesture endpoints are placed at GESTURE_X_MID for horzontal
+ * swipes and GESTURE_Y_(TOP|BOT) for vertical swipes.
+ *
+ * For a gesture to get triggered:
+ * - touch must start within area around gesture start position
+ * - successive touch updates must be within distance limit from each other
+ * - touch updates must occur within area around closest point at gesture line
+ * - touch updates must make progress on gestrure start-end line segment
+ * - the gesture end point must be crossed before touch is released
+ *
+ *
+ *                  DISPLAY_X_MIN                 DISPLAY_X_MIN
+ *                  |                             |
+ *                  |                             |
+ *   DISPLAY_Y_MIN--.-----------------------------.--
+ *                  |              :              | |<-GESTURE_SMALL_STEP
+ *                  |              :              | |
+ *                  |   *          *          *   |--GESTURE_Y_MIN
+ *                  |              :              | |
+ *                  |              :              | |
+ *                  |              :              | |<-GESTURE_LARGE_STEP
+ *                  |              :              | |
+ *                  |              :              | |
+ *                  |              :              | |
+ *                  |~~~~~~~~~~~~~~~~~~~~~~~~~~~~~|--GESTURE_Y_TOP
+ *                  |              :              |
+ *                  |              :              |
+ *                  |              :              |
+ *                  |              :              |
+ *                  |   *          :          *   |--GESTURE_Y_MID
+ *                  |              :              |
+ *                  |              :              |
+ *                  |              :              |
+ *                  |              :              |
+ *                  |~~~~~~~~~~~~~~~~~~~~~~~~~~~~~|--GESTURE_Y_BOT
+ *                  |              :              |
+ *                  |              :              |
+ *                  |              :              |
+ *                  |              :              |
+ *                  |              :              |
+ *                  |              :              |
+ *                  |   *          *          *   |--GESTURE_Y_MAX
+ *                  |              :              |
+ *                  |              :              |
+ *   DISPLAY_Y_MAX--`-----------------------------'
+ *                  |---|----------|          |
+ *                    ^ |    ^     |          |
+ *                    | |    |     |          |
+ *   GESTURE_SMALL_STEP |  GESTURE_LARGE_STEP |
+ *                      |          |          |
+ *                      |          |          GESTURE_X_MAX
+ *                      |          |
+ *                      |          GESTURE_X_MID
+ *                      |
+ *                      GESTURE_X_MIN
+ */
 enum {
-	Xmin = 0, Xmax = 1100,
-	Ymin = 0, Ymax = 1900,
-	// FIXME: ^^^ These should be probed from evdev source, but the
-	//            notification system currently in use makes it a
-	//            bit difficult since the file descriptors are not
-	//            made available to callback functions..
+	/** Display geometry
+	 *
+	 * FIXME: These should be probed from evdev source, but the
+	 *        notification system currently in use makes it a
+	 *        bit difficult since the file descriptors are not
+	 *        made available to callback functions..
+	 */
+	DISPLAY_X_MIN =    0,
+	DISPLAY_X_MAX = 1100,
+	DISPLAY_Y_MIN =    0,
+	DISPLAY_Y_MAX = 1900,
 
-	// common "small step" size = width/10
-	Ss = (Xmax - Xmin) / 10,
+	/** Common gesture "small step"
+	 *
+	 * Used to offset gesture start points from display edges */
+	GESTURE_SMALL_STEP = (DISPLAY_X_MAX - DISPLAY_X_MIN) / 10,
 
-	// common "large step" size = half of width - small step
-	Sl = (Xmax - Xmin) / 2 - Ss,
+	/** Common gesture "small step"
+	 *
+	 * Used as minimum length of acceptable swipe
+	 */
+	GESTURE_LARGE_STEP =
+		(DISPLAY_X_MAX - DISPLAY_X_MIN) / 2 - GESTURE_SMALL_STEP,
 
-	// low-middle-high horizontal limits
-	Xl = Xmin + Ss,
-	Xh = Xmax - Ss,
-	Xm = (Xl + Xh) / 2,
+	/* Low-middle-high X coordinates for gesture start points */
+	GESTURE_X_MIN = DISPLAY_X_MIN + GESTURE_SMALL_STEP,
+	GESTURE_X_MAX = DISPLAY_X_MAX - GESTURE_SMALL_STEP,
+	GESTURE_X_MID = (GESTURE_X_MIN + GESTURE_X_MAX) / 2,
 
-	// low-middle-high vertical limits
-	Yl = Ymin + Ss,
-	Yh = Ymax - Ss,
-	Ym = (Yl + Yh) / 2,
+	/* Low-middle-high Y coordinates for gesture start points */
+	GESTURE_Y_MIN = DISPLAY_Y_MIN + GESTURE_SMALL_STEP,
+	GESTURE_Y_MAX = DISPLAY_Y_MAX - GESTURE_SMALL_STEP,
+	GESTURE_Y_MID = (GESTURE_Y_MIN + GESTURE_Y_MAX) / 2,
 
-	// vertical limit for top-down swipe
-	Yt = Yl + Sl,
+	/** Vertical limit for top-down swipe */
+	GESTURE_Y_TOP = GESTURE_Y_MIN + GESTURE_LARGE_STEP,
 
-	// vertical limit for bottom-up swipe
-	Yb = Yh - Sl,
+	/** Vertical limit for bottom-up swipe */
+	GESTURE_Y_BOT = GESTURE_Y_MAX - GESTURE_LARGE_STEP,
 };
 
 /** State machine for turning touch events into gesture actions */
@@ -1747,7 +1818,7 @@ gesture_close_to(gesture_t *self, const pnt2_t *p1, pnt2_t *p2)
 {
 	(void)self;
 
-	float edge = (Ymax < Xmax) ? Ymax : Xmax;
+	float edge = (DISPLAY_Y_MAX < DISPLAY_X_MAX) ? DISPLAY_Y_MAX : DISPLAY_X_MAX;
 	float radius = edge * 0.10f;
 
 	float x = (p2->x - p1->x) / radius;
@@ -1771,8 +1842,8 @@ gesture_close_to(gesture_t *self, const pnt2_t *p1, pnt2_t *p2)
 static bool
 gesture_in_area(gesture_t *self, const pnt2_t *p1, pnt2_t *p2)
 {
-	float x = (p2->x - p1->x) / (self->area.x * Xmax);
-	float y = (p2->y - p1->y) / (self->area.y * Ymax);
+	float x = (p2->x - p1->x) / (self->area.x * DISPLAY_X_MAX);
+	float y = (p2->y - p1->y) / (self->area.y * DISPLAY_Y_MAX);
 	return (x*x <= 1.0f) && (y*y <= 1.0f);
 }
 
@@ -1998,32 +2069,32 @@ static void gesture_action_unblank_cb(void)
 static gesture_t gestures_lut[] =
 {
 	{
-		.name = "left-to-right",
+		.name   = "left-to-right",
 		.notify = gesture_action_unlock_cb,
-		.beg = { Xl,Ym },
-		.end = { Xm,Ym },
-		.area = { 0.10f, 0.30f },
+		.beg    = { GESTURE_X_MIN, GESTURE_Y_MID },
+		.end    = { GESTURE_X_MID, GESTURE_Y_MID },
+		.area   = { 0.10f, 0.30f },
 	},
 	{
-		.name = "right-to-left",
+		.name   = "right-to-left",
 		.notify = gesture_action_unlock_cb,
-		.beg = { Xh,Ym },
-		.end = { Xm,Ym },
-		.area = { 0.10f, 0.30f },
+		.beg    = { GESTURE_X_MAX, GESTURE_Y_MID },
+		.end    = { GESTURE_X_MID, GESTURE_Y_MID },
+		.area   = { 0.10f, 0.30f },
 	},
 	{
-		.name = "top-down",
+		.name   = "top-down",
 		.notify = gesture_action_unblank_cb,
-		.beg = { Xm,Yl },
-		.end = { Xm,Yt },
-		.area = { 0.30f, 0.10f },
+		.beg    = { GESTURE_X_MID, GESTURE_Y_MIN },
+		.end    = { GESTURE_X_MID, GESTURE_Y_TOP },
+		.area   = { 0.30f, 0.10f },
 	},
 	{
-		.name = "bottom-up",
+		.name   = "bottom-up",
 		.notify = gesture_action_unlock_cb,
-		.beg = { Xm,Yh },
-		.end = { Xm,Yb },
-		.area = { 0.30f, 0.10f },
+		.beg    = { GESTURE_X_MID, GESTURE_Y_MAX },
+		.end    = { GESTURE_X_MID, GESTURE_Y_BOT },
+		.area   = { 0.30f, 0.10f },
 	},
 };
 
