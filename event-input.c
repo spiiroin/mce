@@ -1781,7 +1781,7 @@ typedef struct
 	bool   active;
 
 	/** Amount of line segment travelled, 0=start, 1=end */
-	float  score;
+	float  progress;
 
 	/* Last recorded touch point [screen coordinates] */
 	pnt2_t touch;
@@ -1867,9 +1867,9 @@ gesture_in_area(gesture_t *self, const pnt2_t *p1, pnt2_t *p2)
  * @return distance travelled on the gesture line segment
  */
 static float
-gesture_eval_score(gesture_t *self, const pnt2_t *tp, pnt2_t *ip)
+gesture_eval_progress(gesture_t *self, const pnt2_t *tp, pnt2_t *ip)
 {
-	float score = 0.0f;
+	float progress = 0.0f;
 
 	pnt2_t slope;
 
@@ -1892,8 +1892,8 @@ gesture_eval_score(gesture_t *self, const pnt2_t *tp, pnt2_t *ip)
 	 *
 	 * slope.y==0  slope.x==0
 	 *
-	 * score = 0.0 ... 1.0 if I is between B-E segment, or
-	 *         <0.0 / >1.0 if I is outside B-E segment
+	 * progress = 0.0 ... 1.0 if I is between B-E segment, or
+	 *            <0.0 / >1.0 if I is outside B-E segment
 	 */
 
 	if( gesture_epsilon_p(slope.x) )
@@ -1901,7 +1901,7 @@ gesture_eval_score(gesture_t *self, const pnt2_t *tp, pnt2_t *ip)
 		// vertical: x from line segment, y from touch point
 		ip->x = self->beg.x;
 		ip->y = tp->y;
-		score = (ip->y - self->beg.y) / slope.y;
+		progress = (ip->y - self->beg.y) / slope.y;
 
 	}
 	else if( gesture_epsilon_p(slope.y) )
@@ -1909,7 +1909,7 @@ gesture_eval_score(gesture_t *self, const pnt2_t *tp, pnt2_t *ip)
 		// horizontal: x from touch point, y from line segment
 		ip->x = tp->x;
 		ip->y = self->beg.y;
-		score = (ip->x - self->beg.x) / slope.x;
+		progress = (ip->x - self->beg.x) / slope.x;
 	}
 	else
 	{
@@ -1920,16 +1920,16 @@ gesture_eval_score(gesture_t *self, const pnt2_t *tp, pnt2_t *ip)
 
 		ip->x = x;
 		ip->y = y;
-		score = (ip->x - self->beg.x) / slope.x;
+		progress = (ip->x - self->beg.x) / slope.x;
 	}
 
 	/* Intersection point is at:
 	 *
-	 * x,y = beg + score * slope
+	 * x,y = beg + progress * slope
 	 *
-	 * i.e. score = 0.0 -> at beg, score = 1.0 -> at end
+	 * i.e. progress = 0.0 -> at beg, progress = 1.0 -> at end
 	 */
-	return score;
+	return progress;
 }
 
 /** Deactivate gesture state machine
@@ -1958,9 +1958,10 @@ gesture_start(gesture_t *self, int x, int y)
 
 	if( self->active )
 	{
-		self->score = gesture_eval_score(self, &tp, &ip);
-		self->touch = tp;
-		mce_log(LL_DEBUG, "%s: active=%d, score=%g, x=%d, y=%d", self->name, self->active, self->score, x, y);
+		self->progress = gesture_eval_progress(self, &tp, &ip);
+		self->touch    = tp;
+		mce_log(LL_DEBUG, "%s: active=%d, progress=%g, x=%d, y=%d",
+			self->name, self->active, self->progress, x, y);
 	}
 }
 
@@ -1982,7 +1983,7 @@ gesture_update(gesture_t *self, int x, int y)
 	if( !self->active )
 		goto EXIT;
 
-	float score = gesture_eval_score(self, &tp, &ip);
+	float progress = gesture_eval_progress(self, &tp, &ip);
 
 	if( !gesture_close_to(self, &self->touch, &tp) ) {
 		self->active = false;
@@ -1990,8 +1991,9 @@ gesture_update(gesture_t *self, int x, int y)
 		goto EXIT;
 	}
 
-	if( score < self->score ) {
-		mce_log(LL_DEBUG, "score %g vs %g", score, self->score);
+	if( progress < self->progress ) {
+		mce_log(LL_DEBUG, "progress %g vs %g",
+			progress, self->progress);
 		goto EXIT;
 	}
 
@@ -2002,12 +2004,13 @@ gesture_update(gesture_t *self, int x, int y)
 		goto EXIT;
 	}
 
-	self->touch  = tp;
-	self->score  = score;
+	self->touch    = tp;
+	self->progress = progress;
 
 EXIT:
 	if( was_active || self->active )
-		mce_log(LL_DEBUG, "%s: active=%d, score=%g, x=%d, y=%d", self->name, self->active, self->score, x, y);
+		mce_log(LL_DEBUG, "%s: active=%d, progress=%g, x=%d, y=%d",
+			self->name, self->active, self->progress, x, y);
 	return;
 }
 
@@ -2024,7 +2027,7 @@ gesture_finish(gesture_t *self)
 	if( !self->active )
 		goto EXIT;
 
-	if( self->score < 1.0f ) {
+	if( self->progress < 1.0f ) {
 		mce_log(LL_DEBUG, "end point not crossed");
 		goto EXIT;
 	}
@@ -2037,7 +2040,8 @@ EXIT:
 	self->active = false;
 
 	if( was_active )
-		mce_log(LL_DEBUG, "%s: active=%d, score=%g", self->name, self->active, self->score);
+		mce_log(LL_DEBUG, "%s: active=%d, progress=%g",
+			self->name, self->active, self->progress);
 	return;
 }
 
