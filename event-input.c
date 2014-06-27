@@ -1953,7 +1953,17 @@ gesture_eval_progress(gesture_t *self, const pnt2_t *tp, pnt2_t *ip)
 
 		ip->x = x;
 		ip->y = y;
-		progress = (ip->x - self->beg.x) / slope.x;
+
+		/* To minimize numerical error, calculate progress
+		 * with larger of the two possible divisors */
+		if( fabsf(d) > 1.0f ) {
+			// |slope.x| < |slope.y| -> divide by y
+			progress = (ip->y - self->beg.y) / slope.y;
+		}
+		else {
+			// |slope.x| >= |slope.y| -> divide by x
+			progress = (ip->x - self->beg.x) / slope.x;
+		}
 	}
 
 	/* Intersection point is at:
