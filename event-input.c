@@ -1860,9 +1860,52 @@ gesture_close_to(gesture_t *self, const pnt2_t *p1, pnt2_t *p2)
 
 /** New touch point is within touch area around reference point
  *
- * Used for checking if reported touch point and  related
- * intersection point on beg->end line are within bounds
- * specified in gesture tracking data.
+ * Used for rejecting gestures if touch point moves too far
+ * from the line specified by gesture start and end points.
+ *
+ * Each touch position needs to occur within a rectangle centered
+ * on the closest point on the line specified by gesture start
+ * and stop points.
+ *
+ * For vertical and horizontal swipes it might just be a big
+ * statically defined rectangle, but to accomodate diagonal swipes
+ * it is implemented as "moving box" that handles both
+ *
+ *    .--.--.--.--.--.---.
+ *    |  |  |  |  |  |   |
+ *    |  |  |  |  |  |   |
+ *    |  |  |  |  |  |   |
+ *    | S|-x|-x|-x|-x|-E |
+ *    |  |  |  |  |  |   |
+ *    |  |  |  |  |  |   |
+ *    |  |  |  |  |  |   |
+ *    `--`--`--`--`--`---'
+ *
+ * and
+ *
+ *                    .-----.
+ *                    |     |
+ *                    |     |
+ *                    |  E  |
+ *                .---| /   |
+ *                |   |/    |
+ *                |   `-----'
+ *                |  x  |
+ *            .---| /   |
+ *            |   |/    |
+ *            |   `-----'
+ *            |  x  |
+ *        .---| /   |
+ *        |   |/    |
+ *        |   `-----'
+ *        |  x  |
+ *    .---| /   |
+ *    |   |/    |
+ *    |   `-----'
+ *    |  S  |
+ *    |     |
+ *    |     |
+ *    `-----'
  *
  * @param self gesture tracking state
  * @param p1   intersection point
