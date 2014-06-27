@@ -41,6 +41,7 @@
 #include <errno.h>
 #include <fcntl.h>
 #include <dirent.h>
+#include <math.h>
 
 #include <glib/gstdio.h>
 #include <gio/gio.h>
@@ -1799,7 +1800,7 @@ typedef struct
 static inline bool gesture_epsilon_p(float v)
 {
 	const float epsilon = 1e-6f;
-	return -epsilon < v && v < epsilon;
+	return fabsf(v) < epsilon;
 }
 
 /** Two touch points are close to each other predicate
@@ -1818,7 +1819,7 @@ gesture_close_to(gesture_t *self, const pnt2_t *p1, pnt2_t *p2)
 {
 	(void)self;
 
-	float edge = (DISPLAY_Y_MAX < DISPLAY_X_MAX) ? DISPLAY_Y_MAX : DISPLAY_X_MAX;
+	float edge = fminf(DISPLAY_Y_MAX, DISPLAY_X_MAX);
 	float radius = edge * 0.10f;
 
 	float x = (p2->x - p1->x) / radius;

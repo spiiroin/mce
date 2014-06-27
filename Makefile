@@ -313,6 +313,8 @@ mce : LDLIBS += $(MCE_LDLIBS)
 ifeq ($(ENABLE_HYBRIS),y)
 mce : LDLIBS += -ldl
 endif
+mce : LDLIBS += -lm
+
 mce : mce.o $(patsubst %.c,%.o,$(MCE_CORE))
 
 # ----------------------------------------------------------------------------
