@@ -1637,7 +1637,9 @@ typedef struct
  */
 static inline void pnt2_sub(pnt2_t *r, const pnt2_t *a, const pnt2_t *b)
 {
-	// ok to have r == a == b
+	/* Local variables are used to make sure things work out as
+	 * expected also if destination is also one of the sources,
+	 * for example: pnt2_sub(X,Y,X) or pnt2_sub(X,X,X). */
 	float x = a->x - b->x;
 	float y = a->y - b->y;
 	r->x = x, r->y = y;
