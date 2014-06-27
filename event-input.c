@@ -1749,6 +1749,35 @@ enum {
 	GESTURE_Y_BOT = GESTURE_Y_MAX - GESTURE_LARGE_STEP,
 };
 
+/** Maximum distance between successive touch point updates
+ *
+ * Used to reject gesture if too rapid coordinate changes
+ * are detected.
+ *
+ * Defined as 0.00 - 1.00 ratio where 1.00 is the length of
+ * shorter edge of the display.
+ *
+ * It should be large enough to allow fairly rapid swipes,
+ * but small enough to catch for example erraneous position
+ * reporting at edges (IIRC at some point touch driver could
+ * report zero x coordinates when finger was on the right
+ * edge of the display).
+ */
+#define GESTURE_MAX_UPDATE_DELTA 0.10f
+
+/** Maximum distance between successive touch point updates
+ *
+ * Used for skipping unlikely to matter floating point
+ * calculations when finger is held in one position.
+ *
+ * Defined as pixels.
+ *
+ * Must be significantly smaller than what GESTURE_MAX_UPDATE_DELTA
+ * converted to pixels would be to avoid premature gesture rejection
+ * due to filtering updates.
+ */
+#define GESTURE_MIN_UPDATE_DELTA 4
+
 /** State machine for turning touch events into gesture actions */
 typedef struct
 {
@@ -1820,11 +1849,12 @@ gesture_close_to(gesture_t *self, const pnt2_t *p1, pnt2_t *p2)
 	(void)self;
 
 	float edge = fminf(DISPLAY_Y_MAX, DISPLAY_X_MAX);
-	float radius = edge * 0.10f;
+	float radius = edge * GESTURE_MAX_UPDATE_DELTA;
 
 	float x = (p2->x - p1->x) / radius;
 	float y = (p2->y - p1->y) / radius;
 
+	// point to point distance < limit
 	return (x*x + y*y) <= 1.0f;
 }
 
@@ -1845,6 +1875,8 @@ gesture_in_area(gesture_t *self, const pnt2_t *p1, pnt2_t *p2)
 {
 	float x = (p2->x - p1->x) / (self->area.x * DISPLAY_X_MAX);
 	float y = (p2->y - p1->y) / (self->area.y * DISPLAY_Y_MAX);
+
+	// p2 within rectangular area around p1
 	return (x*x <= 1.0f) && (y*y <= 1.0f);
 }
 
@@ -2137,7 +2169,9 @@ static void gestures_update_touch(int x, int y)
 	int dx = x - gestures_prev_x;
 	int dy = y - gestures_prev_y;
 
-	if( dx*dx + dy*dy <= 3*3*2 )
+	int limit = GESTURE_MIN_UPDATE_DELTA;
+
+	if( dx*dx + dy*dy <= limit*limit )
 		goto EXIT;
 
 	gestures_prev_x = x, gestures_prev_y = y;
