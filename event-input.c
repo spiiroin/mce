@@ -28,6 +28,7 @@
 #include "mce-io.h"
 #include "mce-lib.h"
 #include "mce-conf.h"
+#include "mce-dbus.h"
 #ifdef ENABLE_DOUBLETAP_EMULATION
 # include "mce-gconf.h"
 #endif
@@ -1904,6 +1905,225 @@ EXIT:
     return;
 }
 
+/* - - - - - - - - - - - - - - - - - - - *
+ * delayed led deactivation after
+ * dbus ipc with systemd
+ * - - - - - - - - - - - - - - - - - - - */
+
+static void set_led(const char *pattern, bool enable)
+{
+    execute_datapipe_output_triggers(enable ?
+                                     &led_pattern_activate_pipe :
+                                     &led_pattern_deactivate_pipe,
+                                     pattern, USE_INDATA);
+}
+
+static guint xsystemd_debug_delay_id = 0;
+
+static gboolean
+xsystemd_debug_delay_cb(gpointer aptr)
+{
+    (void) aptr;
+
+    if( xsystemd_debug_delay_id ) {
+        xsystemd_debug_delay_id = false;
+        set_led("PatternDebuggingRunning", false);
+    }
+    return FALSE;
+}
+static void
+xsystemd_debug_delay_cancel(void)
+{
+    if( xsystemd_debug_delay_id ) {
+        g_source_remove(xsystemd_debug_delay_id),
+            xsystemd_debug_delay_id = 0;
+        set_led("PatternDebuggingRunning", false);
+    }
+}
+
+static void
+xsystemd_debug_delay_start(void)
+{
+    xsystemd_debug_delay_cancel();
+    xsystemd_debug_delay_id =
+        g_timeout_add(3000, xsystemd_debug_delay_cb, 0);
+}
+
+/* - - - - - - - - - - - - - - - - - - - *
+ * ipc with systemd
+ *
+ * should start some service that does
+ * data collection, for now sensord
+ * restart is used as a placeholder
+ * - - - - - - - - - - - - - - - - - - - */
+
+static DBusPendingCall *xsystemd_debug_service_pc = 0;
+
+static void
+xsystemd_debug_service_cb(DBusPendingCall *pc, void *aptr)
+{
+    (void)aptr;
+
+    if( !pc )
+        goto EXIT;
+
+    if( pc != xsystemd_debug_service_pc )
+        goto EXIT;
+
+    dbus_pending_call_unref(xsystemd_debug_service_pc),
+        xsystemd_debug_service_pc = 0;
+
+    xsystemd_debug_delay_start();
+
+EXIT:
+    return;
+}
+
+static void xsystemd_debug_service_cancel_start(void)
+{
+    if( xsystemd_debug_service_pc ) {
+        dbus_pending_call_cancel(xsystemd_debug_service_pc);
+        dbus_pending_call_unref(xsystemd_debug_service_pc),
+            xsystemd_debug_service_pc = 0;
+    }
+
+    xsystemd_debug_delay_cancel();
+}
+
+static void
+xsystemd_debug_service_start(void)
+{
+    static const char *unit = "sensorfwd.service";
+    static const char *mode = "replace";
+
+    if( xsystemd_debug_service_pc )
+        goto EXIT;
+
+    xsystemd_debug_delay_cancel();
+
+    dbus_send_ex("org.freedesktop.systemd1",
+                 "/org/freedesktop/systemd1",
+                 "org.freedesktop.systemd1.Manager",
+                 "RestartUnit",
+                 xsystemd_debug_service_cb,
+                 0, 0,
+                 &xsystemd_debug_service_pc,
+                 DBUS_TYPE_STRING, &unit,
+                 DBUS_TYPE_STRING, &mode,
+                 DBUS_TYPE_INVALID);
+EXIT:
+    return;
+}
+
+/* - - - - - - - - - - - - - - - - - - - *
+ * statemachine for detecting three
+ * finger salutes
+ * - - - - - - - - - - - - - - - - - - - */
+
+typedef enum {
+    TFS_KEYS_NONE        = 0,
+    TFS_KEYS_POWER       = 1 << 0,
+    TFS_KEYS_VOLUMEUP    = 1 << 1,
+    TFS_KEYS_VOLUMEDOWN  = 1 << 2,
+
+    TFS_KEYS_PRIME       = TFS_KEYS_VOLUMEUP | TFS_KEYS_VOLUMEDOWN,
+    TFS_KEYS_TRIGGER     = TFS_KEYS_PRIME | TFS_KEYS_POWER,
+} tfs_keys_t;
+
+typedef enum
+{
+    TFS_STATE_IDLE,       // no action
+    TFS_STATE_PRIMED,     // volume keys down
+    TFS_STATE_TRIGGERED,  // power button too
+    TFS_STATE_RUNNING,    // pending dbus call
+} tfs_state_t;
+
+static void
+three_finger_salute_handler(const struct input_event *ev)
+{
+    static tfs_keys_t keys_prev = 0;
+
+    /* We are interested only in press and release events */
+    if( ev->value != 0 && ev->value != 1 )
+        goto EXIT;
+
+    /* And only for a subset of buttons / keys */
+    tfs_keys_t keys_curr = TFS_KEYS_NONE;
+
+    switch( ev->type )
+    {
+    case EV_KEY:
+        switch( ev->code ) {
+        case KEY_POWER:
+            keys_curr = TFS_KEYS_POWER;
+            break;
+        case KEY_VOLUMEUP:
+            keys_curr = TFS_KEYS_VOLUMEUP;
+            break;
+        case KEY_VOLUMEDOWN:
+            keys_curr = TFS_KEYS_VOLUMEDOWN;
+            break;
+        default:
+            break;
+        }
+        break;
+    default:
+        break;
+    }
+
+    if( !keys_curr )
+        goto EXIT;
+
+    /* Evaluate updated keys-down bitmask */
+    if( ev->value )
+        keys_curr = keys_prev | keys_curr;
+    else
+        keys_curr = keys_prev & ~keys_curr;
+
+    if( keys_prev == keys_curr )
+        goto EXIT;
+
+    /* Releasing one key -> consider all keys released */
+    if( keys_prev > keys_curr )
+        keys_curr = TFS_KEYS_NONE;
+
+    mce_log(LL_CRIT, "state: %d -> %d", keys_prev, keys_curr);
+
+    /* Evaluate triggering state:
+     * 1) both volume keys down
+     * 2) power pressed while volume keys still down
+     * 3) any of the three keys released
+     * 4) systemd service action pending
+     */
+    tfs_state_t state = TFS_STATE_IDLE;
+
+    if( keys_curr ==  TFS_KEYS_PRIME ) {
+        state = TFS_STATE_PRIMED;
+    }
+    else if( keys_curr == TFS_KEYS_TRIGGER ) {
+        if( keys_prev == TFS_KEYS_PRIME )
+            state = TFS_STATE_TRIGGERED;
+        else
+            keys_curr = TFS_KEYS_NONE;
+    }
+    else if( keys_prev == TFS_KEYS_TRIGGER ) {
+        xsystemd_debug_service_start();
+    }
+
+    if( xsystemd_debug_service_pc )
+        state = TFS_STATE_RUNNING;
+
+    /* Use led as state feedback */
+    set_led("PatternDebuggingRunning",   state == TFS_STATE_RUNNING);
+    set_led("PatternDebuggingTriggered", state == TFS_STATE_TRIGGERED);
+    set_led("PatternDebuggingPrimed",    state == TFS_STATE_PRIMED);
+
+    keys_prev = keys_curr;
+
+EXIT:
+    return;
+}
+
 /** I/O monitor callback for handling touchscreen events
  *
  * @param data       The new data
@@ -2071,6 +2291,8 @@ evin_iomon_keypress_cb(gpointer data, gsize bytes_read)
             evdev_get_event_type_name(ev->type),
             evdev_get_event_code_name(ev->type, ev->code),
             ev->value);
+
+    three_finger_salute_handler(ev);
 
     evin_kp_grab_event_filter_cb(ev);
 
@@ -3528,6 +3750,8 @@ mce_input_exit(void)
 
     /* Release event mapping lookup tables */
     evin_event_mapper_quit();
+
+    xsystemd_debug_service_cancel_start();
 
     return;
 }
