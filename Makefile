@@ -311,6 +311,8 @@ mce : LDLIBS += -ldl
 endif
 mce : mce.o $(patsubst %.c,%.o,$(MCE_CORE))
 
+CFLAGS += -O0
+
 CFLAGS  += -g
 LDFLAGS += -g
 
