@@ -40,6 +40,7 @@ void mce_modules_dump_info(void)
 	GModule *module;
 	gint i;
 
+	// FIXME: O(N^2) g_slist_nth_data loop
 	for (i = 0; (module = g_slist_nth_data(modules, i)) != NULL; i++) {
 		const gchar *modulename = g_module_name(module);
 		module_info_struct *modinfo;
@@ -213,6 +214,7 @@ void mce_modules_exit(void)
 	gint i;
 
 	if (modules != NULL) {
+		// FIXME: O(N^2) g_slist_nth_data loop
 		for (i = 0; (module = g_slist_nth_data(modules, i)) != NULL; i++) {
 			g_module_close(module);
 		}

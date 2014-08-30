@@ -251,6 +251,7 @@ gboolean mce_gconf_get_int_list(const gchar *const key, GSList **values)
 
 	list = gconf_value_get_list(gcv);
 
+	// FIXME: O(N^2) g_slist_nth_data loop
 	for (i = 0; (gcv2 = g_slist_nth_data(list, i)) != NULL; i++) {
 		gint data;
 
