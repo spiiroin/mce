@@ -3854,6 +3854,56 @@ static mce_dbus_handler_t mce_dbus_handlers[] =
 	}
 };
 
+/** Allocate and release a set of dummy D-Bus messages
+ *
+ * The libdbus keeps a cache DBusMessage objects and recycles them.
+ * While this is good from performance point of view, it also means
+ * that some messages are never released and are attributed in
+ * valgrind logs to the place that happened to do the initial allocation.
+ * This makes it difficult to see if messages are leaked or not.
+ *
+ * By creating a number of dummy dbus messages and then releasing them
+ * we can saturate the caching mechanism. After this we can be relatively
+ * sure that DBusMessages are not being leaked as long all of them are
+ * reported to originate from this function.
+ */
+static void mce_dbus_init_message_cache(void)
+{
+	static const char *service   = "foo.bar";
+	static const char *object    = "/foo/bar";
+	static const char *interface = "foo.bar";
+	static const char *method    = "foo_bar";
+	static const char *dummy =
+		"xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx"
+		"xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx"
+		"xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx";
+
+	DBusMessage *v[10];
+
+	for( size_t i = 0; i < G_N_ELEMENTS(v); ++i ) {
+		v[i] = dbus_message_new_method_call(service,
+						    object,
+						    interface,
+						    method);
+
+		if( !v[i] )
+			continue;
+
+		dbus_message_append_args(v[i],
+					 DBUS_TYPE_STRING, &dummy,
+					 DBUS_TYPE_STRING, &dummy,
+					 DBUS_TYPE_STRING, &dummy,
+					 DBUS_TYPE_STRING, &dummy,
+					 DBUS_TYPE_STRING, &dummy,
+					 DBUS_TYPE_INVALID);
+	}
+
+	for( size_t i = 0; i < G_N_ELEMENTS(v); ++i ) {
+		if( v[i] )
+			dbus_message_unref(v[i]);
+	}
+}
+
 /**
  * Init function for the mce-dbus component
  * Pre-requisites: glib mainloop registered
@@ -3866,6 +3916,8 @@ gboolean mce_dbus_init(const gboolean systembus)
 	gboolean    status   = FALSE;
 	DBusBusType bus_type = DBUS_BUS_SYSTEM;
 	DBusError   error    = DBUS_ERROR_INIT;
+
+	mce_dbus_init_message_cache();
 
 	if( !systembus )
 		bus_type = DBUS_BUS_SESSION;
