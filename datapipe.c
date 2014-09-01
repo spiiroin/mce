@@ -382,6 +382,21 @@ EXIT:
 	return data;
 }
 
+/** Execute data pipe reference count changed triggers
+ *
+ * @param datapipe The datapipe to execute
+ */
+static void
+datapipe_execute_refcount_triggers(datapipe_struct *const datapipe)
+{
+	GSList *list = datapipe->refcount_triggers;
+
+	for( GSList *item = list; item; item = item->next ) {
+		void (*refcount_trigger)(void) = item->data;
+		refcount_trigger();
+	}
+}
+
 /**
  * Append a filter to an existing datapipe
  *
@@ -391,9 +406,6 @@ EXIT:
 void append_filter_to_datapipe(datapipe_struct *const datapipe,
 			       gpointer (*filter)(gpointer data))
 {
-	void (*refcount_trigger)(void);
-	gint i;
-
 	if (datapipe == NULL) {
 		mce_log(LL_ERR,
 			"append_filter_to_datapipe() called "
@@ -417,9 +429,7 @@ void append_filter_to_datapipe(datapipe_struct *const datapipe,
 
 	datapipe->filters = g_slist_append(datapipe->filters, filter);
 
-	for (i = 0; (refcount_trigger = g_slist_nth_data(datapipe->refcount_triggers, i)) != NULL; i++) {
-		refcount_trigger();
-	}
+	datapipe_execute_refcount_triggers(datapipe);
 
 EXIT:
 	return;
@@ -435,9 +445,7 @@ EXIT:
 void remove_filter_from_datapipe(datapipe_struct *const datapipe,
 				 gpointer (*filter)(gpointer data))
 {
-	void (*refcount_trigger)(void);
 	guint oldlen;
-	gint i;
 
 	if (datapipe == NULL) {
 		mce_log(LL_ERR,
@@ -471,9 +479,7 @@ void remove_filter_from_datapipe(datapipe_struct *const datapipe,
 		goto EXIT;
 	}
 
-	for (i = 0; (refcount_trigger = g_slist_nth_data(datapipe->refcount_triggers, i)) != NULL; i++) {
-		refcount_trigger();
-	}
+	datapipe_execute_refcount_triggers(datapipe);
 
 EXIT:
 	return;
@@ -488,9 +494,6 @@ EXIT:
 void append_input_trigger_to_datapipe(datapipe_struct *const datapipe,
 				      void (*trigger)(gconstpointer data))
 {
-	void (*refcount_trigger)(void);
-	gint i;
-
 	if (datapipe == NULL) {
 		mce_log(LL_ERR,
 			"append_input_trigger_to_datapipe() called "
@@ -508,9 +511,7 @@ void append_input_trigger_to_datapipe(datapipe_struct *const datapipe,
 	datapipe->input_triggers = g_slist_append(datapipe->input_triggers,
 						  trigger);
 
-	for (i = 0; (refcount_trigger = g_slist_nth_data(datapipe->refcount_triggers, i)) != NULL; i++) {
-		refcount_trigger();
-	}
+	datapipe_execute_refcount_triggers(datapipe);
 
 EXIT:
 	return;
@@ -526,9 +527,7 @@ EXIT:
 void remove_input_trigger_from_datapipe(datapipe_struct *const datapipe,
 					void (*trigger)(gconstpointer data))
 {
-	void (*refcount_trigger)(void);
 	guint oldlen;
-	gint i;
 
 	if (datapipe == NULL) {
 		mce_log(LL_ERR,
@@ -556,9 +555,7 @@ void remove_input_trigger_from_datapipe(datapipe_struct *const datapipe,
 		goto EXIT;
 	}
 
-	for (i = 0; (refcount_trigger = g_slist_nth_data(datapipe->refcount_triggers, i)) != NULL; i++) {
-		refcount_trigger();
-	}
+	datapipe_execute_refcount_triggers(datapipe);
 
 EXIT:
 	return;
@@ -573,9 +570,6 @@ EXIT:
 void append_output_trigger_to_datapipe(datapipe_struct *const datapipe,
 				       void (*trigger)(gconstpointer data))
 {
-	void (*refcount_trigger)(void);
-	gint i;
-
 	if (datapipe == NULL) {
 		mce_log(LL_ERR,
 			"append_output_trigger_to_datapipe() called "
@@ -593,9 +587,7 @@ void append_output_trigger_to_datapipe(datapipe_struct *const datapipe,
 	datapipe->output_triggers = g_slist_append(datapipe->output_triggers,
 						   trigger);
 
-	for (i = 0; (refcount_trigger = g_slist_nth_data(datapipe->refcount_triggers, i)) != NULL; i++) {
-		refcount_trigger();
-	}
+	datapipe_execute_refcount_triggers(datapipe);
 
 EXIT:
 	return;
@@ -611,9 +603,7 @@ EXIT:
 void remove_output_trigger_from_datapipe(datapipe_struct *const datapipe,
 					 void (*trigger)(gconstpointer data))
 {
-	void (*refcount_trigger)(void);
 	guint oldlen;
-	gint i;
 
 	if (datapipe == NULL) {
 		mce_log(LL_ERR,
@@ -641,9 +631,7 @@ void remove_output_trigger_from_datapipe(datapipe_struct *const datapipe,
 		goto EXIT;
 	}
 
-	for (i = 0; (refcount_trigger = g_slist_nth_data(datapipe->refcount_triggers, i)) != NULL; i++) {
-		refcount_trigger();
-	}
+	datapipe_execute_refcount_triggers(datapipe);
 
 EXIT:
 	return;
