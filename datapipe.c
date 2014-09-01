@@ -229,9 +229,7 @@ void execute_datapipe_input_triggers(datapipe_struct *const datapipe,
 				     const data_source_t use_cache,
 				     const caching_policy_t cache_indata)
 {
-	void (*trigger)(gconstpointer const input);
 	gpointer data;
-	gint i;
 
 	if (datapipe == NULL) {
 		/* Potential memory leak! */
@@ -252,9 +250,11 @@ void execute_datapipe_input_triggers(datapipe_struct *const datapipe,
 		}
 	}
 
-	for (i = 0; (trigger = g_slist_nth_data(datapipe->input_triggers,
-						i)) != NULL; i++) {
-		trigger(data);
+	GSList *list = datapipe->input_triggers;
+
+	for( GSList *item = list; item; item = item->next ) {
+		void (*cb)(gconstpointer input) = item->data;
+		cb(data);
 	}
 
 EXIT:
@@ -274,10 +274,8 @@ gconstpointer execute_datapipe_filters(datapipe_struct *const datapipe,
 				       gpointer indata,
 				       const data_source_t use_cache)
 {
-	gpointer (*filter)(gpointer input);
 	gpointer data;
 	gconstpointer retval = NULL;
-	gint i;
 
 	if (datapipe == NULL) {
 		mce_log(LL_ERR,
@@ -288,15 +286,19 @@ gconstpointer execute_datapipe_filters(datapipe_struct *const datapipe,
 
 	data = (use_cache == USE_CACHE) ? datapipe->cached_data : indata;
 
-	for (i = 0; (filter = g_slist_nth_data(datapipe->filters,
-					       i)) != NULL; i++) {
-		gpointer tmp = filter(data);
+	GSList *list = datapipe->filters;
+
+	for( GSList *item = list; item; item = item->next ) {
+		gpointer (*cb)(gpointer input) = item->data;
+		gpointer tmp = cb(data);
+
+		/* FIXME: This free-or-not logic looks awfully suspicious. */
 
 		/* If the data needs to be freed, and this isn't the indata,
 		 * or if we're not using the cache, then free the data
 		 */
 		if ((datapipe->free_cache == FREE_CACHE) &&
-		    ((i > 0) || (use_cache == USE_INDATA)))
+		    ((item != list) || (use_cache == USE_INDATA)))
 			g_free(data);
 
 		data = tmp;
@@ -320,9 +322,7 @@ void execute_datapipe_output_triggers(const datapipe_struct *const datapipe,
 				      gconstpointer indata,
 				      const data_source_t use_cache)
 {
-	void (*trigger)(gconstpointer input);
 	gconstpointer data;
-	gint i;
 
 	if (datapipe == NULL) {
 		mce_log(LL_ERR,
@@ -333,9 +333,11 @@ void execute_datapipe_output_triggers(const datapipe_struct *const datapipe,
 
 	data = (use_cache == USE_CACHE) ? datapipe->cached_data : indata;
 
-	for (i = 0; (trigger = g_slist_nth_data(datapipe->output_triggers,
-						i)) != NULL; i++) {
-		trigger(data);
+	GSList *list = datapipe->output_triggers;
+
+	for( GSList *item = list; item; item = item->next ) {
+		void (*cb)(gconstpointer input) = item->data;
+		cb(data);
 	}
 
 EXIT:
