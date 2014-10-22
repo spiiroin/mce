@@ -1340,6 +1340,24 @@ static void mdy_datapipe_display_state_cb(gconstpointer data)
 
     mdy_blanking_inhibit_schedule_broadcast();
 
+    if( display_state == MCE_DISPLAY_OFF ) {
+        static const char path[]  = "/proc/sys/vm/compact_memory";
+        static const char value[] = "1\n";
+
+        int fd = open(path, O_WRONLY);
+        if( fd == -1 ) {
+            if( errno != ENOENT )
+                mce_log(LL_WARN, "%s: %s: %m", path, "open");
+        }
+        else {
+            if( write(fd, value, sizeof value - 1) == -1 )
+                mce_log(LL_WARN, "%s: %s: %m", path, "write");
+
+            if( close(fd) == -1 )
+                mce_log(LL_WARN, "%s: %s: %m", path, "close");
+        }
+    }
+
 EXIT:
     return;
 }
