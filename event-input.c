@@ -41,6 +41,7 @@
 #include <errno.h>
 #include <fcntl.h>
 #include <dirent.h>
+#include <math.h>
 
 #include <glib/gstdio.h>
 #include <gio/gio.h>
@@ -1455,6 +1456,707 @@ cleanup:
 }
 
 /* ------------------------------------------------------------------------- *
+ * LPM_GESTURES
+ * ------------------------------------------------------------------------- */
+
+/** Single precision x,y coordinate */
+typedef struct
+{
+    float x;
+    float y;
+} pnt2_t;
+
+/** Subtract one x,y coordinate pair from another
+ *
+ * @param r result of a-b is stored here
+ * @param a coordinate to subtract from
+ * @param b coordinate to subtract
+ *
+ */
+static inline void pnt2_sub(pnt2_t *r, const pnt2_t *a, const pnt2_t *b)
+{
+    /* Local variables are used to make sure things work out as
+     * expected also if destination is also one of the sources,
+     * for example: pnt2_sub(X,Y,X) or pnt2_sub(X,X,X). */
+    float x = a->x - b->x;
+    float y = a->y - b->y;
+    r->x = x, r->y = y;
+}
+
+/** Display geometry constants
+ *
+ * The GESTURE_(X|Y)_(MIN|MID_MAX) coordinates are used as
+ * possible gesture start points, marked with asterisk (*).
+ *
+ * Gesture endpoints are placed at GESTURE_X_MID for horzontal
+ * swipes and GESTURE_Y_(TOP|BOT) for vertical swipes.
+ *
+ * For a gesture to get triggered:
+ * - touch must start within area around gesture start position
+ * - successive touch updates must be within distance limit from each other
+ * - touch updates must occur within area around closest point at gesture line
+ * - touch updates must make progress on gestrure start-end line segment
+ * - the gesture end point must be crossed before touch is released
+ *
+ *
+ *                  DISPLAY_X_MIN                 DISPLAY_X_MIN
+ *                  |                             |
+ *                  |                             |
+ *   DISPLAY_Y_MIN--.-----------------------------.--
+ *                  |              :              | |<-GESTURE_SMALL_STEP
+ *                  |              :              | |
+ *                  |   *          *          *   |--GESTURE_Y_MIN
+ *                  |              :              | |
+ *                  |              :              | |
+ *                  |              :              | |<-GESTURE_LARGE_STEP
+ *                  |              :              | |
+ *                  |              :              | |
+ *                  |              :              | |
+ *                  |~~~~~~~~~~~~~~~~~~~~~~~~~~~~~|--GESTURE_Y_TOP
+ *                  |              :              |
+ *                  |              :              |
+ *                  |              :              |
+ *                  |              :              |
+ *                  |   *          :          *   |--GESTURE_Y_MID
+ *                  |              :              |
+ *                  |              :              |
+ *                  |              :              |
+ *                  |              :              |
+ *                  |~~~~~~~~~~~~~~~~~~~~~~~~~~~~~|--GESTURE_Y_BOT
+ *                  |              :              |
+ *                  |              :              |
+ *                  |              :              |
+ *                  |              :              |
+ *                  |              :              |
+ *                  |              :              |
+ *                  |   *          *          *   |--GESTURE_Y_MAX
+ *                  |              :              |
+ *                  |              :              |
+ *   DISPLAY_Y_MAX--`-----------------------------'
+ *                  |---|----------|          |
+ *                    ^ |    ^     |          |
+ *                    | |    |     |          |
+ *   GESTURE_SMALL_STEP |  GESTURE_LARGE_STEP |
+ *                      |          |          |
+ *                      |          |          GESTURE_X_MAX
+ *                      |          |
+ *                      |          GESTURE_X_MID
+ *                      |
+ *                      GESTURE_X_MIN
+ */
+enum {
+    /** Display geometry
+     *
+     * FIXME: These should be probed from evdev source, but the
+     *        notification system currently in use makes it a
+     *        bit difficult since the file descriptors are not
+     *        made available to callback functions..
+     */
+    DISPLAY_X_MIN =    0,
+    DISPLAY_X_MAX = 1100,
+    DISPLAY_Y_MIN =    0,
+    DISPLAY_Y_MAX = 1900,
+
+    /** Common gesture "small step"
+     *
+     * Used to offset gesture start points from display edges */
+    GESTURE_SMALL_STEP = (DISPLAY_X_MAX - DISPLAY_X_MIN) / 10,
+
+    /** Common gesture "small step"
+     *
+     * Used as minimum length of acceptable swipe
+     */
+    GESTURE_LARGE_STEP =
+    (DISPLAY_X_MAX - DISPLAY_X_MIN) / 2 - GESTURE_SMALL_STEP,
+
+    /* Low-middle-high X coordinates for gesture start points */
+    GESTURE_X_MIN = DISPLAY_X_MIN + GESTURE_SMALL_STEP,
+    GESTURE_X_MAX = DISPLAY_X_MAX - GESTURE_SMALL_STEP,
+    GESTURE_X_MID = (GESTURE_X_MIN + GESTURE_X_MAX) / 2,
+
+    /* Low-middle-high Y coordinates for gesture start points */
+    GESTURE_Y_MIN = DISPLAY_Y_MIN + GESTURE_SMALL_STEP,
+    GESTURE_Y_MAX = DISPLAY_Y_MAX - GESTURE_SMALL_STEP,
+    GESTURE_Y_MID = (GESTURE_Y_MIN + GESTURE_Y_MAX) / 2,
+
+    /** Vertical limit for top-down swipe */
+    GESTURE_Y_TOP = GESTURE_Y_MIN + GESTURE_LARGE_STEP,
+
+    /** Vertical limit for bottom-up swipe */
+    GESTURE_Y_BOT = GESTURE_Y_MAX - GESTURE_LARGE_STEP,
+};
+
+/** Maximum distance between successive touch point updates
+ *
+ * Used to reject gesture if too rapid coordinate changes
+ * are detected.
+ *
+ * Defined as 0.00 - 1.00 ratio where 1.00 is the length of
+ * shorter edge of the display.
+ *
+ * It should be large enough to allow fairly rapid swipes,
+ * but small enough to catch for example erraneous position
+ * reporting at edges (IIRC at some point touch driver could
+ * report zero x coordinates when finger was on the right
+ * edge of the display).
+ */
+#define GESTURE_MAX_UPDATE_DELTA 0.10f
+
+/** Maximum distance between successive touch point updates
+ *
+ * Used for skipping unlikely to matter floating point
+ * calculations when finger is held in one position.
+ *
+ * Defined as pixels.
+ *
+ * Must be significantly smaller than what GESTURE_MAX_UPDATE_DELTA
+ * converted to pixels would be to avoid premature gesture rejection
+ * due to filtering updates.
+ */
+#define GESTURE_MIN_UPDATE_DELTA 4
+
+/** State machine for turning touch events into gesture actions */
+typedef struct
+{
+    /** Gesture name, for debugging purposes */
+    const char *name;
+
+    /** Function to call when tracking finishes successfully */
+    void (*notify)(void);
+
+    /** Start of gesture line segment [screen coordinates].
+     *
+     * The initial touch must occur near this point.
+     */
+    pnt2_t beg;
+
+    /** End of gesture line segment [screen coordinates]
+     *
+     * The touch release must occur near this point.
+     */
+    pnt2_t end;
+
+    /** Touch area size [relative, (1,1) = screen size]
+     *
+     * This defines how close to line segment beg->end
+     * touches must happen to keep the state machine
+     * active.
+     */
+    pnt2_t area;
+
+    /** Line segment tracking is active */
+    bool   active;
+
+    /** Amount of line segment travelled, 0=start, 1=end */
+    float  progress;
+
+    /* Last recorded touch point [screen coordinates] */
+    pnt2_t touch;
+
+} gesture_t;
+
+/** Close to zero floating point predicate
+ *
+ * Used for detecting horizontal / vertical line segments
+ *
+ * @param v a floating point value
+ *
+ * @return true if v is close to zero, false otherwise
+ */
+static inline bool gesture_epsilon_p(float v)
+{
+    const float epsilon = 1e-6f;
+    return fabsf(v) < epsilon;
+}
+
+/** Two touch points are close to each other predicate
+ *
+ * Used for checking if successive touch points reported
+ * are close enough to each other.
+ *
+ * @param self gesture tracking state (not used atm)
+ * @param p1   reference point
+ * @param p2   point to check
+ *
+ * @return true if points are close to each other, false otherwise
+ */
+static bool
+gesture_close_to(gesture_t *self, const pnt2_t *p1, pnt2_t *p2)
+{
+    (void)self;
+
+    float edge = fminf(DISPLAY_Y_MAX, DISPLAY_X_MAX);
+    float radius = edge * GESTURE_MAX_UPDATE_DELTA;
+
+    float x = (p2->x - p1->x) / radius;
+    float y = (p2->y - p1->y) / radius;
+
+    // point to point distance < limit
+    return (x*x + y*y) <= 1.0f;
+}
+
+/** New touch point is within touch area around reference point
+ *
+ * Used for rejecting gestures if touch point moves too far
+ * from the line specified by gesture start and end points.
+ *
+ * Each touch position needs to occur within a rectangle centered
+ * on the closest point on the line specified by gesture start
+ * and stop points.
+ *
+ * For vertical and horizontal swipes it might just be a big
+ * statically defined rectangle, but to accomodate diagonal swipes
+ * it is implemented as "moving box" that handles both
+ *
+ *    .--.--.--.--.--.---.
+ *    |  |  |  |  |  |   |
+ *    |  |  |  |  |  |   |
+ *    |  |  |  |  |  |   |
+ *    | S|-x|-x|-x|-x|-E |
+ *    |  |  |  |  |  |   |
+ *    |  |  |  |  |  |   |
+ *    |  |  |  |  |  |   |
+ *    `--`--`--`--`--`---'
+ *
+ * and
+ *
+ *                    .-----.
+ *                    |     |
+ *                    |     |
+ *                    |  E  |
+ *                .---| /   |
+ *                |   |/    |
+ *                |   `-----'
+ *                |  x  |
+ *            .---| /   |
+ *            |   |/    |
+ *            |   `-----'
+ *            |  x  |
+ *        .---| /   |
+ *        |   |/    |
+ *        |   `-----'
+ *        |  x  |
+ *    .---| /   |
+ *    |   |/    |
+ *    |   `-----'
+ *    |  S  |
+ *    |     |
+ *    |     |
+ *    `-----'
+ *
+ * @param self gesture tracking state
+ * @param p1   intersection point
+ * @param p2   touch point
+ *
+ * @return true if points are close to each other, false otherwise
+ */
+static bool
+gesture_in_area(gesture_t *self, const pnt2_t *p1, pnt2_t *p2)
+{
+    float x = (p2->x - p1->x) / (self->area.x * DISPLAY_X_MAX);
+    float y = (p2->y - p1->y) / (self->area.y * DISPLAY_Y_MAX);
+
+    // p2 within rectangular area around p1
+    return (x*x <= 1.0f) && (y*y <= 1.0f);
+}
+
+/** Calculate position within gesture line segment
+ *
+ * Given gesture tracking state and a touch point, this function
+ * will calculate the closest point in the line specified by
+ * gesture start and end points.
+ *
+ * The value returned is a progression score telling how much
+ * of the gesture line segment has been travelled. A value of
+ * 0.0 means touch point is at the start of the gesture and value
+ * of 1.0 means touch point is at the end of the gesture. Values
+ * less than zero or greater than one mean touch point is beyond
+ * the gesture line segment.
+ *
+ * @param self gesture tracking state
+ * @param tp   touch point
+ * @param ip   [output]intersection point
+ *
+ * @return distance travelled on the gesture line segment
+ */
+static float
+gesture_eval_progress(gesture_t *self, const pnt2_t *tp, pnt2_t *ip)
+{
+    float progress = 0.0f;
+
+    pnt2_t slope;
+
+    pnt2_sub(&slope, &self->end, &self->beg);
+
+    /* B = line segment start point
+     * E = line segment end point
+     * T = touch point
+     * I = point on line B->E that is closest to T
+     *
+     *                B               E
+     *                |              /
+     * B---I---E      |             /
+     *     |          I---T        I
+     *     |          |           / \
+     *     T          |          /   \
+     *                E         B     T
+     *
+     * horizontal  vertical    sloped
+     *
+     * slope.y==0  slope.x==0
+     *
+     * progress = 0.0 ... 1.0 if I is between B-E segment, or
+     *            <0.0 / >1.0 if I is outside B-E segment
+     */
+
+    if( gesture_epsilon_p(slope.x) )
+    {
+        // vertical: x from line segment, y from touch point
+        ip->x = self->beg.x;
+        ip->y = tp->y;
+        progress = (ip->y - self->beg.y) / slope.y;
+
+    }
+    else if( gesture_epsilon_p(slope.y) )
+    {
+        // horizontal: x from touch point, y from line segment
+        ip->x = tp->x;
+        ip->y = self->beg.y;
+        progress = (ip->x - self->beg.x) / slope.x;
+    }
+    else
+    {
+        // sloped: calculate x and y from line equations
+        float d = slope.y / slope.x;
+        float x = (tp->y - self->beg.y + d*(tp->x + self->beg.x)) / (2*d);
+        float y = self->beg.y + d * (x - self->beg.x);
+
+        ip->x = x;
+        ip->y = y;
+
+        /* To minimize numerical error, calculate progress
+         * with larger of the two possible divisors */
+        if( fabsf(d) > 1.0f ) {
+            // |slope.x| < |slope.y| -> divide by y
+            progress = (ip->y - self->beg.y) / slope.y;
+        }
+        else {
+            // |slope.x| >= |slope.y| -> divide by x
+            progress = (ip->x - self->beg.x) / slope.x;
+        }
+    }
+
+    /* Intersection point is at:
+     *
+     * x,y = beg + progress * slope
+     *
+     * i.e. progress = 0.0 -> at beg, progress = 1.0 -> at end
+     */
+    return progress;
+}
+
+/** Deactivate gesture state machine
+ */
+static void
+gesture_disable(gesture_t *self)
+{
+    self->active = false;
+}
+
+/** Initialize gesture state machine
+ *
+ * If touch point is near gesture start position, the state machine
+ * is activated.
+ *
+ * @param x x-coordinate of the initial touch point
+ * @param y y-coordinate of the initial touch point
+ */
+static void
+gesture_start(gesture_t *self, int x, int y)
+{
+    pnt2_t tp = { .x = x, .y = y };
+    pnt2_t ip;
+
+    self->active = gesture_in_area(self, &self->beg, &tp);
+
+    if( self->active )
+    {
+        self->progress = gesture_eval_progress(self, &tp, &ip);
+        self->touch    = tp;
+        mce_log(LL_DEBUG, "%s: active=%d, progress=%g, x=%d, y=%d",
+                self->name, self->active, self->progress, x, y);
+    }
+}
+
+/** Update gesture state machine
+ *
+ * If touch point is progressing along the gesture line segment, the
+ * state machine is kept active.
+ *
+ * @param x x-coordinate of the updated touch point
+ * @param y y-coordinate of the update touch point
+ */
+static void
+gesture_update(gesture_t *self, int x, int y)
+{
+        pnt2_t tp = { .x = x, .y = y };
+    pnt2_t ip;
+    bool was_active = self->active;
+
+    if( !self->active )
+        goto EXIT;
+
+    float progress = gesture_eval_progress(self, &tp, &ip);
+
+    if( !gesture_close_to(self, &self->touch, &tp) ) {
+        self->active = false;
+        mce_log(LL_DEBUG, "too far from last");
+        goto EXIT;
+    }
+
+    if( progress < self->progress ) {
+        mce_log(LL_DEBUG, "progress %g vs %g",
+                progress, self->progress);
+        goto EXIT;
+    }
+
+    if( !gesture_in_area(self, &ip, &tp) ) {
+        mce_log(LL_DEBUG, "ip:%g,%g tp=%g,%g", ip.x,ip.y, tp.x,tp.y);
+        mce_log(LL_DEBUG, "too far from line");
+        self->active = false;
+        goto EXIT;
+    }
+
+    self->touch    = tp;
+    self->progress = progress;
+
+EXIT:
+    if( was_active || self->active )
+        mce_log(LL_DEBUG, "%s: active=%d, progress=%g, x=%d, y=%d",
+                self->name, self->active, self->progress, x, y);
+    return;
+}
+
+/** Finalize gesture state machine
+ *
+ * If the state machine is still active and touch is released near the
+ * end point of gesture, an action is triggered.
+ */
+static void
+gesture_finish(gesture_t *self)
+{
+    bool was_active = self->active;
+
+    if( !self->active )
+        goto EXIT;
+
+    if( self->progress < 1.0f ) {
+        mce_log(LL_DEBUG, "end point not crossed");
+        goto EXIT;
+    }
+
+    mce_log(LL_DEBUG, "trigger %s", self->name);
+    if( self->notify )
+        self->notify();
+
+EXIT:
+    self->active = false;
+
+    if( was_active )
+        mce_log(LL_DEBUG, "%s: active=%d, progress=%g",
+                self->name, self->active, self->progress);
+    return;
+}
+
+/** Callback for performing: Unblank and unlock action
+ */
+static void gesture_action_unlock_cb(void)
+{
+    mce_log(LL_DEVEL, "unlock gesture triggered");
+    execute_datapipe(&display_state_req_pipe,
+                     GINT_TO_POINTER(MCE_DISPLAY_ON),
+                     USE_INDATA, CACHE_INDATA);
+
+    execute_datapipe(&tk_lock_pipe,
+                     GINT_TO_POINTER(LOCK_OFF),
+                     USE_INDATA, CACHE_INDATA);
+}
+
+/** Callback for performing: Unblank action
+ */
+static void gesture_action_unblank_cb(void)
+{
+    mce_log(LL_DEVEL, "unblank gesture triggered");
+    execute_datapipe(&display_state_req_pipe,
+                         GINT_TO_POINTER(MCE_DISPLAY_ON),
+                         USE_INDATA, CACHE_INDATA);
+}
+
+/** Array of gesture tracking state machines */
+static gesture_t gestures_lut[] =
+{
+    {
+        .name   = "left-to-right",
+        .notify = gesture_action_unlock_cb,
+        .beg    = { GESTURE_X_MIN, GESTURE_Y_MID },
+        .end    = { GESTURE_X_MID, GESTURE_Y_MID },
+        .area   = { 0.10f, 0.30f },
+    },
+    {
+        .name   = "right-to-left",
+        .notify = gesture_action_unlock_cb,
+        .beg    = { GESTURE_X_MAX, GESTURE_Y_MID },
+        .end    = { GESTURE_X_MID, GESTURE_Y_MID },
+        .area   = { 0.10f, 0.30f },
+    },
+    {
+        .name   = "top-down",
+        .notify = gesture_action_unblank_cb,
+        .beg    = { GESTURE_X_MID, GESTURE_Y_MIN },
+        .end    = { GESTURE_X_MID, GESTURE_Y_TOP },
+        .area   = { 0.30f, 0.10f },
+    },
+    {
+        .name   = "bottom-up",
+        .notify = gesture_action_unlock_cb,
+        .beg    = { GESTURE_X_MID, GESTURE_Y_MAX },
+        .end    = { GESTURE_X_MID, GESTURE_Y_BOT },
+        .area   = { 0.30f, 0.10f },
+    },
+};
+
+/** Last touch point reported to gesture tracking state machines */
+static int gestures_prev_x = -1;
+static int gestures_prev_y = -1;
+
+/* Gesture tracking enabled setting */
+static gboolean gestures_enabled = FALSE;
+
+/** GConf notification ID for touch unblock delay */
+static guint gestures_enabled_id = 0;
+
+/** Initialize all gesture tracking state machines
+ *
+ * All state machines with starting point near the given
+ * coordinate are activated.
+ */
+static void gestures_start_touch(int x, int y)
+{
+    gestures_prev_x = x;
+    gestures_prev_y = y;
+
+    for( size_t i = 0; i < G_N_ELEMENTS(gestures_lut); ++i )
+        gesture_start(gestures_lut+i, x, y);
+}
+
+/** Feed position changes to all gesture tracking state machines
+ *
+ * Still active state machines are kept active if the updated
+ * touch position makes progress along the gesture line segment.
+ */
+static void gestures_update_touch(int x, int y)
+{
+    int dx = x - gestures_prev_x;
+    int dy = y - gestures_prev_y;
+
+    int limit = GESTURE_MIN_UPDATE_DELTA;
+
+    if( dx*dx + dy*dy <= limit*limit )
+        goto EXIT;
+
+    gestures_prev_x = x, gestures_prev_y = y;
+
+    for( size_t i = 0; i < G_N_ELEMENTS(gestures_lut); ++i )
+        gesture_update(gestures_lut+i, x, y);
+EXIT:
+    return;
+}
+
+/** Finalize all gesture tracking state machines
+ *
+ * Still active state machines can trigger actions if
+ * touch point was left near the end of gesture line segment.
+ */
+static void gestures_end_touch(void)
+{
+    for( size_t i = 0; i < G_N_ELEMENTS(gestures_lut); ++i )
+        gesture_finish(gestures_lut+i);
+}
+
+/** Disable all gesture tracking state machines
+ */
+static void gestures_reset_touch(void)
+{
+    for( size_t i = 0; i < G_N_ELEMENTS(gestures_lut); ++i )
+        gesture_disable(gestures_lut+i);
+}
+
+/** Gconf notification callback for lpm gestures setting
+ *
+ * @param client (not used)
+ * @param id     (not used)
+ * @param entry  GConf entry that changed
+ * @param data   (not used)
+ */
+static void gestures_enabled_cb(GConfClient *const client,
+                                const guint id,
+                                GConfEntry *const entry,
+                                gpointer const data)
+{
+    (void)client; (void)id; (void)data;
+
+    gboolean enabled = gestures_enabled;
+    const GConfValue *value = 0;
+
+    if( !entry )
+        goto EXIT;
+
+    if( !(value = gconf_entry_get_value(entry)) )
+        goto EXIT;
+
+    if( value->type == GCONF_VALUE_BOOL )
+        enabled = gconf_value_get_bool(value);
+
+    if( gestures_enabled == enabled )
+        goto EXIT;
+
+    mce_log(LL_NOTICE, "lpm gestures setting: %d -> %d",
+            gestures_enabled, enabled);
+
+    gestures_enabled = enabled;
+EXIT:
+    return;
+}
+
+/** Initialize lpm gesture detection
+ */
+static void gestures_init(void)
+{
+    /* reset state machine data */
+    gestures_reset_touch();
+
+    /* LPM gesture tracking mode */
+    mce_gconf_notifier_add(MCE_GCONF_EVENT_INPUT_PATH,
+                           MCE_GCONF_LPM_GESTURES_ENABLED_PATH,
+                           gestures_enabled_cb,
+                           &gestures_enabled_id);
+
+    mce_gconf_get_bool(MCE_GCONF_LPM_GESTURES_ENABLED_PATH,
+                       &gestures_enabled);
+
+    mce_log(LL_NOTICE, "lpm gestures setting: %d",
+            gestures_enabled);
+}
+
+/** De-initialize lpm gesture detection
+ */
+static void gestures_quit(void)
+{
+    mce_gconf_notifier_remove(gestures_enabled_id),
+        gestures_enabled_id = 0;
+}
+
+/* ------------------------------------------------------------------------- *
  * DOUBLETAP_EMULATION
  * ------------------------------------------------------------------------- */
 
@@ -1700,6 +2402,18 @@ evin_doubletap_emulate(const struct input_event *eve)
 
         int tp0 = evin_doubletap_active_touch_points(hist+i0);
         int tp1 = evin_doubletap_active_touch_points(hist+i1);
+
+        /* Do lpm gesture tracking too, if enabled */
+        if( gestures_enabled ) {
+            if( tp0 == 1 && tp1 == 0 )
+                gestures_start_touch(hist[i0].dt_x, hist[i0].dt_y);
+            else if( tp0 == 1 && tp1 == 1 )
+                gestures_update_touch(hist[i0].dt_x, hist[i0].dt_y);
+            else if( tp0 == 0 && tp1 == 1 )
+                gestures_end_touch();
+            else
+                gestures_reset_touch();
+        }
 
         if( tp0 != tp1 ) {
             /* 2nd and 3rd last events before current */
@@ -3491,7 +4205,11 @@ mce_input_init(void)
     evin_iomon_switch_states_update();
     evin_iomon_keyboard_state_update();
 
+    /* start lpm gesture tracking */
+    gestures_init();
+
     status = TRUE;
+
 EXIT:
     return status;
 }
@@ -3516,6 +4234,9 @@ mce_input_exit(void)
                                         evin_ts_grab_wanted_cb);
     remove_output_trigger_from_datapipe(&keypad_grab_wanted_pipe,
                                         evin_kp_grab_wanted_cb);
+
+    /* Stop lpm gesture tracking */
+    gestures_quit();
 
     /* Remove input device directory monitor */
     evin_devdir_monitor_quit();

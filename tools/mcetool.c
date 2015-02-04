@@ -4794,6 +4794,28 @@ static void xmce_get_touch_unblock_delay(void)
 }
 
 /* ------------------------------------------------------------------------- *
+ * lpm gestures
+ * ------------------------------------------------------------------------- */
+
+static bool xmce_set_lpm_gestures(const char *args)
+{
+        debugf("%s(%s)\n", __FUNCTION__, args);
+        gboolean val = xmce_parse_enabled(args);
+        mcetool_gconf_set_bool(MCE_GCONF_LPM_GESTURES_ENABLED_PATH, val);
+        return true;
+}
+
+static void xmce_get_lpm_gestures(void)
+{
+        gboolean val = 0;
+        char txt[32] = "unknown";
+
+        if( mcetool_gconf_get_bool(MCE_GCONF_LPM_GESTURES_ENABLED_PATH, &val) )
+                snprintf(txt, sizeof txt, "%s", val ? "enabled" : "disabled");
+        printf("%-"PAD1"s %s\n", "Use lpm gestures:", txt);
+}
+
+/* ------------------------------------------------------------------------- *
  * cpu scaling governor override
  * ------------------------------------------------------------------------- */
 
@@ -5252,6 +5274,7 @@ static bool xmce_get_status(const char *args)
         xmce_get_input_policy_mode();
         xmce_get_touch_unblock_delay();
         xmce_get_exception_lengths();
+        xmce_get_lpm_gestures();
 
         get_led_breathing_enabled();
         get_led_breathing_limit();
@@ -6316,6 +6339,13 @@ static const mce_opt_t options[] =
                 .values      = "msecs",
                 .usage       =
                         "set the delay for ending touch blocking after unblanking\n"
+        },
+        {
+                .name        = "set-lpm-gestures",
+                .with_arg    = xmce_set_lpm_gestures,
+                .values      = "enabled|disabled",
+                .usage       =
+                        "whether touch input gestures should be used with lpm display\n"
         },
         {
                 .name        = "begin-notification",
