@@ -721,10 +721,11 @@ EXIT:
  *		   or 0 if only passing pointers or data as pointers
  * @param initial_data Initial cache content
  */
-void setup_datapipe(datapipe_struct *const datapipe,
-		    const read_only_policy_t read_only,
-		    const cache_free_policy_t free_cache,
-		    const gsize datasize, gpointer initial_data)
+void setup_datapipe_real(const char *name,
+			 datapipe_struct *const datapipe,
+			 const read_only_policy_t read_only,
+			 const cache_free_policy_t free_cache,
+			 const gsize datasize, gpointer initial_data)
 {
 	if (datapipe == NULL) {
 		mce_log(LL_ERR,
@@ -732,7 +733,7 @@ void setup_datapipe(datapipe_struct *const datapipe,
 			"without a valid datapipe");
 		goto EXIT;
 	}
-
+	datapipe->name = name;
 	datapipe->filters = NULL;
 	datapipe->input_triggers = NULL;
 	datapipe->output_triggers = NULL;
@@ -741,6 +742,9 @@ void setup_datapipe(datapipe_struct *const datapipe,
 	datapipe->read_only = read_only;
 	datapipe->free_cache = free_cache;
 	datapipe->cached_data = initial_data;
+
+	name = datapipe->name ?: "unknown";
+	mce_log(LL_CRIT, "%s initialized", name);
 
 EXIT:
 	return;
@@ -760,35 +764,37 @@ void free_datapipe(datapipe_struct *const datapipe)
 		goto EXIT;
 	}
 
+	const char *name = datapipe->name ?: "unknown";
+
 	/* Warn about still registered filters/triggers */
 	if (datapipe->filters != NULL) {
-		mce_log(LL_INFO,
-			"free_datapipe() called on a datapipe that "
-			"still has registered filter(s)");
+		mce_log(LL_WARN,
+			"free_datapipe(%s) called on a datapipe that "
+			"still has registered filter(s)", name);
 	}
 
 	if (datapipe->input_triggers != NULL) {
-		mce_log(LL_INFO,
-			"free_datapipe() called on a datapipe that "
-			"still has registered input_trigger(s)");
+		mce_log(LL_WARN,
+			"free_datapipe(%s) called on a datapipe that "
+			"still has registered input_trigger(s)", name);
 	}
 
 	if (datapipe->output_triggers != NULL) {
-		mce_log(LL_INFO,
-			"free_datapipe() called on a datapipe that "
-			"still has registered output_trigger(s)");
+		mce_log(LL_WARN,
+			"free_datapipe(%s) called on a datapipe that "
+			"still has registered output_trigger(s)", name);
 	}
 
 	if (datapipe->refcount_triggers != NULL) {
-		mce_log(LL_INFO,
-			"free_datapipe() called on a datapipe that "
-			"still has registered refcount_trigger(s)");
+		mce_log(LL_WARN,
+			"free_datapipe(%s) called on a datapipe that "
+			"still has registered refcount_trigger(s)", name);
 	}
 
 	if (datapipe->free_cache == FREE_CACHE) {
 		g_free(datapipe->cached_data);
 	}
-
+	mce_log(LL_CRIT, "%s cleaned up", name);
 EXIT:
 	return;
 }
@@ -797,128 +803,128 @@ EXIT:
  */
 void mce_datapipe_init(void)
 {
-	setup_datapipe(&system_state_pipe, READ_WRITE, DONT_FREE_CACHE,
+	setup_datapipe(system_state_pipe, READ_WRITE, DONT_FREE_CACHE,
 		       0, GINT_TO_POINTER(MCE_STATE_UNDEF));
-	setup_datapipe(&master_radio_pipe, READ_WRITE, DONT_FREE_CACHE,
+	setup_datapipe(master_radio_pipe, READ_WRITE, DONT_FREE_CACHE,
 		       0, GINT_TO_POINTER(0));
-	setup_datapipe(&call_state_pipe, READ_WRITE, DONT_FREE_CACHE,
+	setup_datapipe(call_state_pipe, READ_WRITE, DONT_FREE_CACHE,
 		       0, GINT_TO_POINTER(CALL_STATE_NONE));
-	setup_datapipe(&call_type_pipe, READ_WRITE, DONT_FREE_CACHE,
+	setup_datapipe(call_type_pipe, READ_WRITE, DONT_FREE_CACHE,
 		       0, GINT_TO_POINTER(NORMAL_CALL));
-	setup_datapipe(&alarm_ui_state_pipe, READ_ONLY, DONT_FREE_CACHE,
+	setup_datapipe(alarm_ui_state_pipe, READ_ONLY, DONT_FREE_CACHE,
 		       0, GINT_TO_POINTER(MCE_ALARM_UI_INVALID_INT32));
-	setup_datapipe(&submode_pipe, READ_ONLY, DONT_FREE_CACHE,
+	setup_datapipe(submode_pipe, READ_ONLY, DONT_FREE_CACHE,
 		       0, GINT_TO_POINTER(MCE_NORMAL_SUBMODE));
-	setup_datapipe(&display_state_pipe, READ_WRITE, DONT_FREE_CACHE,
+	setup_datapipe(display_state_pipe, READ_WRITE, DONT_FREE_CACHE,
 		       0, GINT_TO_POINTER(MCE_DISPLAY_UNDEF));
-	setup_datapipe(&display_state_req_pipe, READ_WRITE, DONT_FREE_CACHE,
+	setup_datapipe(display_state_req_pipe, READ_WRITE, DONT_FREE_CACHE,
 		       0, GINT_TO_POINTER(MCE_DISPLAY_UNDEF));
-	setup_datapipe(&display_state_next_pipe, READ_WRITE, DONT_FREE_CACHE,
+	setup_datapipe(display_state_next_pipe, READ_WRITE, DONT_FREE_CACHE,
 		       0, GINT_TO_POINTER(MCE_DISPLAY_UNDEF));
-	setup_datapipe(&exception_state_pipe, READ_WRITE, DONT_FREE_CACHE,
+	setup_datapipe(exception_state_pipe, READ_WRITE, DONT_FREE_CACHE,
 		       0, GINT_TO_POINTER(UIEXC_NONE));
-	setup_datapipe(&display_brightness_pipe, READ_WRITE, DONT_FREE_CACHE,
+	setup_datapipe(display_brightness_pipe, READ_WRITE, DONT_FREE_CACHE,
 		       0, GINT_TO_POINTER(3));
-	setup_datapipe(&led_brightness_pipe, READ_WRITE, DONT_FREE_CACHE,
+	setup_datapipe(led_brightness_pipe, READ_WRITE, DONT_FREE_CACHE,
 		       0, GINT_TO_POINTER(0));
-	setup_datapipe(&lpm_brightness_pipe, READ_WRITE, DONT_FREE_CACHE,
+	setup_datapipe(lpm_brightness_pipe, READ_WRITE, DONT_FREE_CACHE,
 		       0, GINT_TO_POINTER(0));
-	setup_datapipe(&led_pattern_activate_pipe, READ_ONLY, FREE_CACHE,
+	setup_datapipe(led_pattern_activate_pipe, READ_ONLY, FREE_CACHE,
 		       0, NULL);
-	setup_datapipe(&device_resumed_pipe, READ_ONLY, DONT_FREE_CACHE,
+	setup_datapipe(device_resumed_pipe, READ_ONLY, DONT_FREE_CACHE,
 		       0, NULL);
-	setup_datapipe(&led_pattern_deactivate_pipe, READ_ONLY, FREE_CACHE,
+	setup_datapipe(led_pattern_deactivate_pipe, READ_ONLY, FREE_CACHE,
 		       0, NULL);
-	setup_datapipe(&user_activity_pipe, READ_ONLY, DONT_FREE_CACHE,
+	setup_datapipe(user_activity_pipe, READ_ONLY, DONT_FREE_CACHE,
 		       0, NULL);
-	setup_datapipe(&key_backlight_pipe, READ_WRITE, DONT_FREE_CACHE,
+	setup_datapipe(key_backlight_pipe, READ_WRITE, DONT_FREE_CACHE,
 		       0, GINT_TO_POINTER(0));
-	setup_datapipe(&keypress_pipe, READ_ONLY, FREE_CACHE,
+	setup_datapipe(keypress_pipe, READ_ONLY, FREE_CACHE,
 		       sizeof (struct input_event), NULL);
-	setup_datapipe(&touchscreen_pipe, READ_ONLY, FREE_CACHE,
+	setup_datapipe(touchscreen_pipe, READ_ONLY, FREE_CACHE,
 		       sizeof (struct input_event), NULL);
-	setup_datapipe(&device_inactive_pipe, READ_WRITE, DONT_FREE_CACHE,
+	setup_datapipe(device_inactive_pipe, READ_WRITE, DONT_FREE_CACHE,
 		       0, GINT_TO_POINTER(TRUE));
-	setup_datapipe(&lockkey_pipe, READ_ONLY, DONT_FREE_CACHE,
+	setup_datapipe(lockkey_pipe, READ_ONLY, DONT_FREE_CACHE,
 		       0, GINT_TO_POINTER(0));
-	setup_datapipe(&keyboard_slide_pipe, READ_ONLY, DONT_FREE_CACHE,
+	setup_datapipe(keyboard_slide_pipe, READ_ONLY, DONT_FREE_CACHE,
 		       0, GINT_TO_POINTER(COVER_CLOSED));
-	setup_datapipe(&keyboard_available_pipe, READ_ONLY, DONT_FREE_CACHE,
+	setup_datapipe(keyboard_available_pipe, READ_ONLY, DONT_FREE_CACHE,
 		       0, GINT_TO_POINTER(COVER_CLOSED));
-	setup_datapipe(&lid_sensor_is_working_pipe, READ_WRITE,
+	setup_datapipe(lid_sensor_is_working_pipe, READ_WRITE,
 		       DONT_FREE_CACHE, 0, GINT_TO_POINTER(FALSE));
-	setup_datapipe(&lid_cover_sensor_pipe, READ_ONLY, DONT_FREE_CACHE,
+	setup_datapipe(lid_cover_sensor_pipe, READ_ONLY, DONT_FREE_CACHE,
 		       0, GINT_TO_POINTER(COVER_UNDEF));
-	setup_datapipe(&lid_cover_policy_pipe, READ_ONLY, DONT_FREE_CACHE,
+	setup_datapipe(lid_cover_policy_pipe, READ_ONLY, DONT_FREE_CACHE,
 		       0, GINT_TO_POINTER(COVER_UNDEF));
-	setup_datapipe(&lens_cover_pipe, READ_ONLY, DONT_FREE_CACHE,
+	setup_datapipe(lens_cover_pipe, READ_ONLY, DONT_FREE_CACHE,
 		       0, GINT_TO_POINTER(0));
-	setup_datapipe(&proximity_sensor_pipe, READ_ONLY, DONT_FREE_CACHE,
+	setup_datapipe(proximity_sensor_pipe, READ_ONLY, DONT_FREE_CACHE,
 		       0, GINT_TO_POINTER(COVER_OPEN));
-	setup_datapipe(&ambient_light_sensor_pipe, READ_ONLY, DONT_FREE_CACHE,
+	setup_datapipe(ambient_light_sensor_pipe, READ_ONLY, DONT_FREE_CACHE,
 		       0, GINT_TO_POINTER(400));
-	setup_datapipe(&ambient_light_level_pipe, READ_ONLY, DONT_FREE_CACHE,
+	setup_datapipe(ambient_light_level_pipe, READ_ONLY, DONT_FREE_CACHE,
 		       0, GINT_TO_POINTER(400));
-	setup_datapipe(&ambient_light_poll_pipe, READ_WRITE, DONT_FREE_CACHE,
+	setup_datapipe(ambient_light_poll_pipe, READ_WRITE, DONT_FREE_CACHE,
 		       0, GINT_TO_POINTER(false));
-	setup_datapipe(&orientation_sensor_pipe, READ_ONLY, DONT_FREE_CACHE,
+	setup_datapipe(orientation_sensor_pipe, READ_ONLY, DONT_FREE_CACHE,
 		       0, GINT_TO_POINTER(MCE_ORIENTATION_UNDEFINED));
-	setup_datapipe(&tk_lock_pipe, READ_ONLY, DONT_FREE_CACHE,
+	setup_datapipe(tk_lock_pipe, READ_ONLY, DONT_FREE_CACHE,
 		       0, GINT_TO_POINTER(LOCK_UNDEF));
-	setup_datapipe(&charger_state_pipe, READ_ONLY, DONT_FREE_CACHE,
+	setup_datapipe(charger_state_pipe, READ_ONLY, DONT_FREE_CACHE,
 		       0, GINT_TO_POINTER(CHARGER_STATE_UNDEF));
-	setup_datapipe(&battery_status_pipe, READ_ONLY, DONT_FREE_CACHE,
+	setup_datapipe(battery_status_pipe, READ_ONLY, DONT_FREE_CACHE,
 		       0, GINT_TO_POINTER(BATTERY_STATUS_UNDEF));
-	setup_datapipe(&battery_level_pipe, READ_ONLY, DONT_FREE_CACHE,
+	setup_datapipe(battery_level_pipe, READ_ONLY, DONT_FREE_CACHE,
 		       0, GINT_TO_POINTER(100));
-	setup_datapipe(&camera_button_pipe, READ_ONLY, DONT_FREE_CACHE,
+	setup_datapipe(camera_button_pipe, READ_ONLY, DONT_FREE_CACHE,
 		       0, GINT_TO_POINTER(CAMERA_BUTTON_UNDEF));
-	setup_datapipe(&inactivity_timeout_pipe, READ_ONLY, DONT_FREE_CACHE,
+	setup_datapipe(inactivity_timeout_pipe, READ_ONLY, DONT_FREE_CACHE,
 		       0, GINT_TO_POINTER(DEFAULT_INACTIVITY_TIMEOUT));
-	setup_datapipe(&audio_route_pipe, READ_ONLY, DONT_FREE_CACHE,
+	setup_datapipe(audio_route_pipe, READ_ONLY, DONT_FREE_CACHE,
 		       0, GINT_TO_POINTER(AUDIO_ROUTE_UNDEF));
-	setup_datapipe(&usb_cable_pipe, READ_ONLY, DONT_FREE_CACHE,
+	setup_datapipe(usb_cable_pipe, READ_ONLY, DONT_FREE_CACHE,
 		       0, GINT_TO_POINTER(USB_CABLE_UNDEF));
-	setup_datapipe(&jack_sense_pipe, READ_ONLY, DONT_FREE_CACHE,
+	setup_datapipe(jack_sense_pipe, READ_ONLY, DONT_FREE_CACHE,
 		       0, GINT_TO_POINTER(0));
-	setup_datapipe(&power_saving_mode_pipe, READ_ONLY, DONT_FREE_CACHE,
+	setup_datapipe(power_saving_mode_pipe, READ_ONLY, DONT_FREE_CACHE,
 		       0, GINT_TO_POINTER(0));
-	setup_datapipe(&thermal_state_pipe, READ_ONLY, DONT_FREE_CACHE,
+	setup_datapipe(thermal_state_pipe, READ_ONLY, DONT_FREE_CACHE,
 		       0, GINT_TO_POINTER(THERMAL_STATE_UNDEF));
-	setup_datapipe(&heartbeat_pipe, READ_ONLY, DONT_FREE_CACHE,
+	setup_datapipe(heartbeat_pipe, READ_ONLY, DONT_FREE_CACHE,
 		       0, GINT_TO_POINTER(0));
 
-	setup_datapipe(&compositor_available_pipe, READ_ONLY, DONT_FREE_CACHE,
+	setup_datapipe(compositor_available_pipe, READ_ONLY, DONT_FREE_CACHE,
 		       0, GINT_TO_POINTER(SERVICE_STATE_UNDEF));
-	setup_datapipe(&lipstick_available_pipe, READ_ONLY, DONT_FREE_CACHE,
+	setup_datapipe(lipstick_available_pipe, READ_ONLY, DONT_FREE_CACHE,
 		       0, GINT_TO_POINTER(SERVICE_STATE_UNDEF));
-	setup_datapipe(&usbmoded_available_pipe, READ_ONLY, DONT_FREE_CACHE,
+	setup_datapipe(usbmoded_available_pipe, READ_ONLY, DONT_FREE_CACHE,
 		       0, GINT_TO_POINTER(SERVICE_STATE_UNDEF));
 	setup_datapipe(&ngfd_available_pipe, READ_ONLY, DONT_FREE_CACHE,
 		       0, GINT_TO_POINTER(SERVICE_STATE_UNDEF));
 
-	setup_datapipe(&dsme_available_pipe, READ_ONLY, DONT_FREE_CACHE,
+	setup_datapipe(dsme_available_pipe, READ_ONLY, DONT_FREE_CACHE,
 		       0, GINT_TO_POINTER(SERVICE_STATE_UNDEF));
 
-	setup_datapipe(&packagekit_locked_pipe, READ_ONLY, DONT_FREE_CACHE,
+	setup_datapipe(packagekit_locked_pipe, READ_ONLY, DONT_FREE_CACHE,
 		       0, GINT_TO_POINTER(FALSE));
-	setup_datapipe(&update_mode_pipe, READ_ONLY, DONT_FREE_CACHE,
+	setup_datapipe(update_mode_pipe, READ_ONLY, DONT_FREE_CACHE,
 		       0, GINT_TO_POINTER(FALSE));
-	setup_datapipe(&shutting_down_pipe, READ_ONLY, DONT_FREE_CACHE,
+	setup_datapipe(shutting_down_pipe, READ_ONLY, DONT_FREE_CACHE,
 		       0, GINT_TO_POINTER(FALSE));
-	setup_datapipe(&device_lock_state_pipe, READ_ONLY, DONT_FREE_CACHE,
+	setup_datapipe(device_lock_state_pipe, READ_ONLY, DONT_FREE_CACHE,
 		       0, GINT_TO_POINTER(DEVICE_LOCK_UNDEFINED));
-	setup_datapipe(&touch_grab_wanted_pipe, READ_WRITE, DONT_FREE_CACHE,
+	setup_datapipe(touch_grab_wanted_pipe, READ_WRITE, DONT_FREE_CACHE,
 		       0, GINT_TO_POINTER(FALSE));
-	setup_datapipe(&touch_grab_active_pipe, READ_ONLY, DONT_FREE_CACHE,
+	setup_datapipe(touch_grab_active_pipe, READ_ONLY, DONT_FREE_CACHE,
 		       0, GINT_TO_POINTER(FALSE));
-	setup_datapipe(&keypad_grab_wanted_pipe, READ_WRITE, DONT_FREE_CACHE,
+	setup_datapipe(keypad_grab_wanted_pipe, READ_WRITE, DONT_FREE_CACHE,
 		       0, GINT_TO_POINTER(FALSE));
-	setup_datapipe(&keypad_grab_active_pipe, READ_ONLY, DONT_FREE_CACHE,
+	setup_datapipe(keypad_grab_active_pipe, READ_ONLY, DONT_FREE_CACHE,
 		       0, GINT_TO_POINTER(FALSE));
-	setup_datapipe(&music_playback_pipe, READ_ONLY, DONT_FREE_CACHE,
+	setup_datapipe(music_playback_pipe, READ_ONLY, DONT_FREE_CACHE,
 		       0, GINT_TO_POINTER(FALSE));
-	setup_datapipe(&proximity_blank_pipe, READ_ONLY, DONT_FREE_CACHE,
+	setup_datapipe(proximity_blank_pipe, READ_ONLY, DONT_FREE_CACHE,
 		       0, GINT_TO_POINTER(FALSE));
 }
 

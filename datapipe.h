@@ -45,6 +45,8 @@ const char *device_lock_state_repr(device_lock_state_t state);
  * Only access this struct through the functions
  */
 typedef struct {
+	const char *name;
+
 	GSList *filters;		/**< The filters */
 	GSList *input_triggers;		/**< Triggers called on indata */
 	GSList *output_triggers;	/**< Triggers called on outdata */
@@ -219,10 +221,16 @@ void append_refcount_trigger_to_datapipe(datapipe_struct *const datapipe,
 void remove_refcount_trigger_from_datapipe(datapipe_struct *const datapipe,
 					   void (*trigger)(void));
 
-void setup_datapipe(datapipe_struct *const datapipe,
-		    const read_only_policy_t read_only,
-		    const cache_free_policy_t free_cache,
-		    const gsize datasize, gpointer initial_data);
+void setup_datapipe_real(const char *name,
+			 datapipe_struct *const datapipe,
+			 const read_only_policy_t read_only,
+			 const cache_free_policy_t free_cache,
+			 const gsize datasize, gpointer initial_data);
+
+#define setup_datapipe(datapipe_,read_only_,free_cache_,datasize_,initial_data_)\
+   setup_datapipe_real(#datapipe_,&(datapipe_),\
+		       read_only_,free_cache_,datasize_,initial_data_)
+
 void free_datapipe(datapipe_struct *const datapipe);
 
 /* Binding arrays */
