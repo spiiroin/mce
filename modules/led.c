@@ -154,7 +154,7 @@ typedef struct {
 	gchar channel2[CHANNEL_SIZE + 1];
 	/** Pattern for the B-channel */
 	gchar channel3[CHANNEL_SIZE + 1];
-	guint gconf_cb_id;		/**< Callback ID for GConf entry */
+	guint enabled_gconf_id;		/**< Callback ID for GConf entry */
 	guint rgb_color;                /**< RGB24 data for libhybris use */
 	gboolean undecided;		/**< Flag for policy=6 lock in */
 } pattern_struct;
@@ -348,9 +348,11 @@ static void              display_state_trigger          (gconstpointer data);
 static void              led_brightness_trigger         (gconstpointer data);
 static void              led_pattern_activate_trigger   (gconstpointer data);
 static void              led_pattern_deactivate_trigger (gconstpointer data);
-static gint              gconf_cb_find                  (gconstpointer data, gconstpointer userdata);
-static void              led_gconf_cb                   (GConfClient *const gcc, const guint id, GConfEntry *const entry, gpointer const data);
-static gboolean          pattern_get_enabled            (const gchar *const patternname, guint *gconf_cb_id);
+
+static gint              pattern_enabled_find_cb        (gconstpointer data, gconstpointer userdata);
+static void              pattern_enabled_gconf_cb       (GConfClient *const gcc, const guint id, GConfEntry *const entry, gpointer const data);
+static gboolean          pattern_get_enabled            (const gchar *const patternname, guint *enabled_gconf_id);
+
 static gboolean          led_activate_pattern_dbus_cb   (DBusMessage *const msg);
 static gboolean          led_deactivate_pattern_dbus_cb (DBusMessage *const msg);
 static gboolean          led_enable_dbus_cb             (DBusMessage *const msg);
@@ -922,9 +924,9 @@ static pattern_struct *led_pattern_create(void)
 	if( !self )
 		goto EXIT;
 
-	self->name        = 0;
-	self->timeout_id  = 0;
-	self->gconf_cb_id = 0;
+	self->name             = 0;
+	self->timeout_id       = 0;
+	self->enabled_gconf_id = 0;
 
 EXIT:
 	return self;
@@ -940,7 +942,7 @@ static void led_pattern_delete(pattern_struct *self)
 		goto EXIT;
 
 	mce_hbtimer_delete(self->timeout_id);
-	mce_gconf_notifier_remove(self->gconf_cb_id);
+	mce_gconf_notifier_remove(self->enabled_gconf_id);
 	free(self->name);
 
 	g_slice_free(pattern_struct, self);
@@ -1883,16 +1885,15 @@ static void led_pattern_deactivate_trigger(gconstpointer data)
  * @return 0 if the GConf callback id of data matches that of userdata,
  *         -1 if they don't match
  */
-static gint gconf_cb_find(gconstpointer data, gconstpointer userdata)
+static gint pattern_enabled_find_cb(gconstpointer data, gconstpointer userdata)
 {
-	pattern_struct *psp;
+	const pattern_struct *psp = data;
+	const guint          *idp = userdata;
 
-	if ((data == NULL) || (userdata == NULL))
+	if( !psp || !idp )
 		return -1;
 
-	psp = (pattern_struct *)data;
-
-	return psp->gconf_cb_id != *(guint *)userdata;
+	return psp->enabled_gconf_id != *idp;
 }
 
 /**
@@ -1903,32 +1904,35 @@ static gint gconf_cb_find(gconstpointer data, gconstpointer userdata)
  * @param entry The modified GConf entry
  * @param data Unused
  */
-static void led_gconf_cb(GConfClient *const gcc, const guint id,
-			 GConfEntry *const entry, gpointer const data)
+static void pattern_enabled_gconf_cb(GConfClient *const gcc, const guint id,
+				     GConfEntry *const entry, gpointer const data)
 {
-	const GConfValue *gcv = gconf_entry_get_value(entry);
-	pattern_struct *psp = NULL;
-	GList *glp = NULL;
-
 	(void)gcc;
 	(void)data;
 
-	/* Key is unset */
-	if (gcv == NULL) {
-		mce_log(LL_DEBUG,
-			"GConf Key `%s' has been unset",
+	/* Get changed gconf value */
+	const GConfValue *gcv = gconf_entry_get_value(entry);
+	if( !gcv ) {
+		mce_log(LL_DEBUG, "GConf Key `%s' has been unset",
 			gconf_entry_get_key(entry));
 		goto EXIT;
 	}
 
-	if ((glp = g_queue_find_custom(pattern_stack,
-				       &id, gconf_cb_find)) != NULL) {
-		psp = (pattern_struct *)glp->data;
-		psp->enabled = gconf_value_get_bool(gcv);
-		led_update_active_pattern();
-	} else {
+	/* Locate led pattern associated with the gconf value */
+	GList *glp = g_queue_find_custom(pattern_stack, &id,
+					 pattern_enabled_find_cb);
+
+	if( !glp ) {
 		mce_log(LL_WARN, "Spurious GConf value received; confused!");
+		goto EXIT;
 	}
+	pattern_struct *psp = glp->data;
+
+	/* Update enabled state */
+	psp->enabled = gconf_value_get_bool(gcv);
+
+	/* Re-evaluate active pattern */
+	led_update_active_pattern();
 
 EXIT:
 	return;
@@ -1938,14 +1942,17 @@ EXIT:
  * Get the enabled/disabled value from GConf and set up a notifier
  */
 static gboolean pattern_get_enabled(const gchar *const patternname,
-				    guint *gconf_cb_id)
+				    guint *enabled_gconf_id)
 {
 	gboolean retval = DEFAULT_PATTERN_ENABLED;
 	gchar *path = gconf_concat_dir_and_key(MCE_GCONF_LED_PATH,
 					       patternname);
 
-	/* Since custom led patterns do not have persistent toggles
-	 * in configuration, avoid complaining about missing keys
+	/* If a led pattern does not have a built in persistent
+	 * toggle, add a one that defaults to pattern enabled */
+	mce_gconf_add_bool(path, true);
+
+	/* Avoid complaining about missing keys
 	 * on default verbosity level. */
 	if( !mce_gconf_has_key(path) ) {
 		mce_log(LL_INFO, "missing led config entry: %s", path);
@@ -1954,7 +1961,7 @@ static gboolean pattern_get_enabled(const gchar *const patternname,
 
 	/* Since we've set a default, error handling is unnecessary */
 	mce_gconf_notifier_add(MCE_GCONF_LED_PATH, path,
-			       led_gconf_cb, gconf_cb_id);
+			       pattern_enabled_gconf_cb, enabled_gconf_id);
 	mce_gconf_get_bool(path, &retval);
 
 EXIT:
@@ -2351,7 +2358,7 @@ static gboolean init_lysti_patterns(void)
 			led_pattern_set_active(psp, FALSE);
 
 			psp->enabled = pattern_get_enabled(patternlist[i],
-							   &(psp->gconf_cb_id));
+							   &psp->enabled_gconf_id);
 
 			psp->name = strdup(patternlist[i]);
 
@@ -2486,7 +2493,7 @@ static gboolean init_njoy_patterns(void)
 			led_pattern_set_active(psp, FALSE);
 
 			psp->enabled = pattern_get_enabled(patternlist[i],
-							   &(psp->gconf_cb_id));
+							   &psp->enabled_gconf_id);
 
 			psp->name = strdup(patternlist[i]);
 
@@ -2579,7 +2586,7 @@ static gboolean init_mono_patterns(void)
 			psp->active = FALSE;
 
 			psp->enabled = pattern_get_enabled(patternlist[i],
-							   &(psp->gconf_cb_id));
+							   &psp->enabled_gconf_id);
 
 			g_free(tmp);
 
@@ -2754,7 +2761,7 @@ static gboolean init_hybris_patterns(void)
 			psp->rgb_color  = strtol(v[IDX_COLOR], 0, 16);
 			psp->active     = FALSE;
 			psp->enabled    = pattern_get_enabled(name,
-							   &psp->gconf_cb_id);
+							      &psp->enabled_gconf_id);
 
 			g_queue_insert_sorted(pattern_stack, psp,
 					      queue_prio_compare,
