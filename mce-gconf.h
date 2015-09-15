@@ -28,6 +28,10 @@ gboolean mce_gconf_set_int(const gchar *const key, const gint value);
 gboolean mce_gconf_get_bool(const gchar *const key, gboolean *value);
 gboolean mce_gconf_get_int(const gchar *const key, gint *value);
 gboolean mce_gconf_get_int_list(const gchar *const key, GSList **values);
+
+gboolean mce_gconf_get_string_list(const gchar *key, GSList **values);
+gboolean mce_gconf_get_string_array(const gchar *key, gchar ***parray, gsize *pcount);
+
 gboolean mce_gconf_get_string(const gchar *const key, gchar **value);
 gboolean mce_gconf_set_string(const gchar *const key, const gchar *const value);
 gboolean mce_gconf_notifier_add(const gchar *path, const gchar *key,
@@ -46,8 +50,11 @@ void mce_gconf_track_string(const gchar *key, gchar **val, const gchar *def,
 gboolean mce_gconf_init(void);
 void mce_gconf_exit(void);
 
-gboolean mce_gconf_add_int    (const gchar *const key, gint def);
-gboolean mce_gconf_add_bool   (const gchar *const key, gboolean def);
-gboolean mce_gconf_add_string (const gchar *const key, const char *def);
+gboolean mce_gconf_add_int         (const gchar *const key, gint def);
+gboolean mce_gconf_add_bool        (const gchar *const key, gboolean def);
+gboolean mce_gconf_add_string      (const gchar *const key, const char *def);
+
+gboolean mce_gconf_add_string_list (const gchar *const key, GSList *values);
+gboolean mce_gconf_add_string_array(const gchar *const key, gchar **array);
 
 #endif /* _MCE_GCONF_H_ */

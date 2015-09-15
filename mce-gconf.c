@@ -33,6 +33,32 @@ static gboolean gconf_disabled = FALSE;
 /** List of GConf notifiers */
 static GSList *gconf_notifiers = NULL;
 
+static gchar **string_list_to_array(GSList *list, gsize *pcount)
+{
+	gsize   count = g_slist_length(list);
+	gchar  **array = g_malloc((count+1) * sizeof *array);
+
+	for( count = 0; list; list = list->next ) {
+		const gchar *str = list->data;
+		array[count++] = g_strdup(str);
+	}
+	array[count] = 0;
+
+	if( pcount ) *pcount = count;
+
+	return array;
+}
+
+static GSList *string_array_to_list(gchar **array)
+{
+	GSList *list = 0;
+	for( size_t i = 0; array[i]; ++i )
+		list = g_slist_prepend(list, array[i]);
+	list = g_slist_reverse(list);
+	return list;
+
+}
+
 /** Check if gconf-key exists
  *
  * @param key Name of value
@@ -97,6 +123,47 @@ gboolean mce_gconf_add_string(const gchar *const key, const char *def)
 
 EXIT:
 	return added;
+}
+
+gboolean mce_gconf_add_string_list(const gchar *const key, GSList *strings)
+{
+	gboolean added = FALSE;
+
+	if( !gconf_client )
+		goto EXIT;
+
+	/* Convert list of strings to list of string values */
+	GSList *values = 0;
+
+	for( ; strings; strings = strings->next ) {
+		const char *str = strings->data;
+		GConfValue *val = gconf_value_new(GCONF_VALUE_STRING);
+		gconf_value_set_string(val, str);
+		values = g_slist_prepend(values, val);
+	}
+	values = g_slist_reverse(values);
+
+	/* Update setting */
+	added = gconf_client_add_list(gconf_client, key, GCONF_VALUE_STRING, values);
+	gconf_client_suggest_sync(gconf_client, NULL);
+
+	/* Release the list of string values */
+	for( GSList *item = values; item; item = item->next ) {
+		GConfValue *val = item->data;
+		gconf_value_free(val);
+	}
+	g_slist_free(values);
+
+EXIT:
+	return added;
+}
+
+gboolean mce_gconf_add_string_array(const gchar *const key, gchar **array)
+{
+	GSList *list = string_array_to_list(array);
+	gboolean success = mce_gconf_add_string_list(key, list);
+	g_slist_free(list);
+	return success;
 }
 
 /**
@@ -312,6 +379,84 @@ EXIT:
 	g_clear_error(&error);
 
 	return status;
+}
+
+/** Return a string list from the specified GConf key
+ *
+ * @param key   The GConf key to get the values from
+ * @param[out]  values Will contain an GSList with the values on return
+ *
+ * @return TRUE on success, FALSE on failure
+ */
+gboolean mce_gconf_get_string_list(const gchar *key, GSList **values)
+{
+	gboolean    status = FALSE;
+	GError     *err    = 0;
+	GConfValue *gcv    = 0;
+
+	if( gconf_disabled ) {
+		mce_log(LL_DEBUG, "blocked %s query", key);
+		goto EXIT;
+	}
+
+	if( !(gcv = gconf_client_get(gconf_client, key, &err)) ) {
+		mce_log(err ? LL_WARN : LL_INFO,
+			"Could not retrieve %s from GConf; %s",
+			key, err ? err->message : "Key not set");
+		goto EXIT;
+	}
+
+	if( gcv->type != GCONF_VALUE_LIST ||
+	    gconf_value_get_list_type(gcv) != GCONF_VALUE_STRING ) {
+		mce_log(LL_ERR,
+			"GConf key %s should have type: %d<%d>, but has type: %d<%d>",
+			key, GCONF_VALUE_LIST, GCONF_VALUE_INT,
+			gcv->type, gconf_value_get_list_type(gcv));
+		goto EXIT;
+	}
+
+	for( GSList *list = gconf_value_get_list(gcv); list; list = list->next ) {
+		GConfValue *val = list->data;
+		const char *str = gconf_value_get_string(val);;
+		*values = g_slist_prepend(*values, (char *)str);
+	}
+	*values = g_slist_reverse(*values);
+
+	status = TRUE;
+
+EXIT:
+	if( gcv )
+		gconf_value_free(gcv);
+
+	g_clear_error(&err);
+
+	return status;
+}
+
+gboolean mce_gconf_get_string_array(const gchar *key, gchar ***parray, gsize *pcount)
+{
+	gboolean   success = FALSE;
+	GSList    *list    = 0;
+	gsize      count   = 0;
+	gchar    **array   = 0;
+
+	if( !mce_gconf_get_string_list(key, &list) )
+		goto EXIT;
+
+	if( !(array = string_list_to_array(list, &count)) )
+		goto EXIT;
+
+	*parray = array,
+		array = 0;
+	if( pcount )
+		*pcount = count;
+	success = TRUE;
+
+EXIT:
+	g_slist_free(list);
+	g_strfreev(array);
+
+	return success;
 }
 
 /**

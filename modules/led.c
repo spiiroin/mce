@@ -1415,11 +1415,13 @@ static void led_update_active_pattern(void)
 
 		new_active_pattern = iter->data;
 
+#if 0 // needed for extreme debugging only
 		mce_log(LL_DEBUG,
 			"pattern: %s, active: %d, enabled: %d",
 			new_active_pattern->name,
 			new_active_pattern->active,
 			new_active_pattern->enabled);
+#endif
 
 		/* If the pattern is deactivated, ignore */
 		if (new_active_pattern->active == FALSE)
@@ -2678,6 +2680,8 @@ static gboolean list_includes_item(gchar **list, const gchar *elem)
 	return FALSE;
 }
 
+#define LED_ZZZ_PREFIX "/system/osso/dsm/leds/patterns"
+
 /**
  * Init patterns for libhybris-LED
  *
@@ -2728,6 +2732,7 @@ static gboolean init_hybris_patterns(void)
 		}
 	}
 
+	/* Convert from config to settings default */
 	for( size_t i = 0; pattern[i]; i++ ) {
 		const char *name = pattern[i];
 		if( list_includes_item(disable, name) ) {
@@ -2747,9 +2752,39 @@ static gboolean init_hybris_patterns(void)
 				name);
 		}
 		else {
-			mce_log(LL_DEBUG,"Getting LED pattern for: %s",
-				name);
+			char key[256];
+			snprintf(key, sizeof key, "%s/%s", LED_ZZZ_PREFIX,
+				 name);
+			mce_gconf_add_string_array(key, v);
+		}
+		g_strfreev(v);
+	}
 
+	/* Construct from settings */
+	for( size_t i = 0; pattern[i]; i++ ) {
+		const char *name = pattern[i];
+		if( list_includes_item(disable, name) ) {
+			mce_log(LL_NOTICE,"LED pattern '%s' disabled", name);
+			continue;
+		}
+
+		char key[256];
+		snprintf(key, sizeof key, "%s/%s", LED_ZZZ_PREFIX, name);
+
+		mce_log(LL_DEBUG,"Getting LED pattern for: %s",	name);
+
+		gchar **v = 0;
+		gsize length = 0;
+		mce_gconf_get_string_array(key, &v, &length);
+
+		if( !v || !length ) {
+			mce_log(LL_WARN,"No setting for LED pattern %s", name);
+		}
+		else if( length != IDX_NUMOF ) {
+			mce_log(LL_ERR,"Invalid setting for LED pattern %s",
+				name);
+		}
+		else {
 			pattern_struct *psp = led_pattern_create();
 
 			psp->name       = strdup(name);
@@ -2767,6 +2802,7 @@ static gboolean init_hybris_patterns(void)
 					      queue_prio_compare,
 					      NULL);
 		}
+
 		g_strfreev(v);
 	}
 
