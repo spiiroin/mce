@@ -63,12 +63,12 @@
 #define PAD2 "28"
 
 #if MCETOOL_ENABLE_EXTRA_DEBUG
-# define debugf(FMT, ARGS...) fprintf(stderr, PROG_NAME": D: "FMT, ##ARGS)
+# define debugf(FMT, ARGS...)   fprintf(stderr, PROG_NAME": D: "FMT, ##ARGS)
 #else
-# define debugf(FMT, ARGS...) do { }while(0)
+# define debugf(FMT, ARGS...)   do { }while(0)
 #endif
-
-# define errorf(FMT, ARGS...) fprintf(stderr, PROG_NAME": E: "FMT, ##ARGS)
+# define warningf(FMT, ARGS...) fprintf(stderr, PROG_NAME": W: "FMT, ##ARGS)
+# define errorf(FMT, ARGS...)   fprintf(stderr, PROG_NAME": E: "FMT, ##ARGS)
 
 /* ------------------------------------------------------------------------- *
  * GENERIC DBUS HELPERS
@@ -1789,28 +1789,28 @@ EXIT:
 static const char * const led_patterns[] =
 {
         "PatternBatteryCharging",
-        "PatternBatteryFull",
-        "PatternCommunication",
-        "PatternPowerOff",
-        "PatternPowerOn",
-        "PatternWebcamActive",
-        "PatternDeviceOn",
-        "PatternBatteryLow",
-        "PatternCommunicationAndBatteryFull",
         "PatternBatteryChargingFlat",
+        "PatternBatteryFull",
+        "PatternBatteryLow",
         "PatternCommonNotification",
+        "PatternCommunication",
+        "PatternCommunicationAndBatteryFull",
         "PatternCommunicationCall",
         "PatternCommunicationEmail",
         "PatternCommunicationIM",
         "PatternCommunicationSMS",
         "PatternCsdWhite",
+        "PatternDeviceOn",
         "PatternDisplayBlankFailed",
-        "PatternDisplayUnblankFailed",
-        "PatternDisplaySuspendFailed",
-        "PatternDisplayResumeFailed",
-        "PatternKillingLipstick",
-        "PatternTouchInputBlocked",
         "PatternDisplayDimmed",
+        "PatternDisplayResumeFailed",
+        "PatternDisplaySuspendFailed",
+        "PatternDisplayUnblankFailed",
+        "PatternKillingLipstick",
+        "PatternPowerOff",
+        "PatternPowerOn",
+        "PatternTouchInputBlocked",
+        "PatternWebcamActive",
         0
 };
 
@@ -1890,8 +1890,8 @@ static bool set_led_pattern_enabled(const char *pattern, bool enable)
         char key[256];
 
         if( !is_configurable_pattern(pattern) ) {
-                errorf("%s: not a configurable led pattern name\n", pattern);
-                return false;
+                warningf("%s: not a configurable led pattern name\n", pattern);
+                //return false;
         }
 
         snprintf(key, sizeof key, "/system/osso/dsm/leds/%s", pattern);
