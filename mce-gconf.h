@@ -46,4 +46,8 @@ void mce_gconf_track_string(const gchar *key, gchar **val, const gchar *def,
 gboolean mce_gconf_init(void);
 void mce_gconf_exit(void);
 
+gboolean mce_gconf_add_int    (const gchar *const key, gint def);
+gboolean mce_gconf_add_bool   (const gchar *const key, gboolean def);
+gboolean mce_gconf_add_string (const gchar *const key, const char *def);
+
 #endif /* _MCE_GCONF_H_ */

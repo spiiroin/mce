@@ -58,6 +58,47 @@ EXIT:
 	return res;
 }
 
+gboolean mce_gconf_add_bool(const gchar *const key, gboolean def)
+{
+	gboolean added = FALSE;
+
+	if( !gconf_client )
+		goto EXIT;
+
+	added = gconf_client_add_bool(gconf_client, key, def);
+	gconf_client_suggest_sync(gconf_client, NULL);
+EXIT:
+	return added;
+}
+
+gboolean mce_gconf_add_int(const gchar *const key, gint def)
+{
+	gboolean added = FALSE;
+
+	if( !gconf_client )
+		goto EXIT;
+
+	added = gconf_client_add_int(gconf_client, key, def);
+	gconf_client_suggest_sync(gconf_client, NULL);
+
+EXIT:
+	return added;
+}
+
+gboolean mce_gconf_add_string(const gchar *const key, const char *def)
+{
+	gboolean added = FALSE;
+
+	if( !gconf_client )
+		goto EXIT;
+
+	added = gconf_client_add_string(gconf_client, key, def);
+	gconf_client_suggest_sync(gconf_client, NULL);
+
+EXIT:
+	return added;
+}
+
 /**
  * Set an integer GConf key to the specified value
  *

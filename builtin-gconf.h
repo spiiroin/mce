@@ -7,6 +7,7 @@
 #ifndef BUILTIN_GCONF_H_
 # define BUILTIN_GCONF_H_
 
+#include <stdbool.h>
 #include <glib.h>
 
 # ifdef __cplusplus
@@ -89,7 +90,10 @@ typedef struct GConfEntry
   // private
 
   char *def;
+  char *typ;
 
+  bool is_custom;
+  bool in_use;
 } GConfEntry;
 
 typedef struct GConfClient
@@ -103,6 +107,8 @@ typedef struct GConfClient
   GSList  *entries;
 
   GSList  *notify_list;
+
+  guint    pending_save_id;
 
 } GConfClient;
 
@@ -164,6 +170,16 @@ gboolean gconf_client_set_list(GConfClient *client, const gchar *key, GConfValue
 void gconf_client_suggest_sync(GConfClient *client, GError **err);
 guint gconf_client_notify_add(GConfClient *client, const gchar *namespace_section, GConfClientNotifyFunc func, gpointer user_data, GFreeFunc destroy_notify, GError **err);
 void gconf_client_notify_remove(GConfClient *client, guint cnxn);
+
+/* ------------------------------------------------------------------------- *
+ * CUSTOM FUNCTIONS
+ * ------------------------------------------------------------------------- */
+
+gboolean gconf_client_add_bool  (GConfClient *client, const gchar *key, gboolean val);
+gboolean gconf_client_add_int   (GConfClient *client, const gchar *key, gint val);
+gboolean gconf_client_add_float (GConfClient *client, const gchar *key, double val);
+gboolean gconf_client_add_string(GConfClient *client, const gchar *key, const gchar *val);
+gboolean gconf_client_add_list  (GConfClient *client, const gchar *key, GConfValueType list_type, GSList *list);
 
 # ifdef __cplusplus
 };

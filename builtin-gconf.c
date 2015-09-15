@@ -53,6 +53,9 @@
 /** Path to persistent storage file */
 #define VALUES_PATH G_STRINGIFY(MCE_VAR_DIR)"/builtin-gconf.values"
 
+/** Path to dynamic keys file */
+#define CUSTOM_PATH G_STRINGIFY(MCE_VAR_DIR)"/builtin-gconf.custom"
+
 /* ========================================================================= *
  *
  * MACROS
@@ -68,68 +71,136 @@
  *
  * ========================================================================= */
 
-static GQuark gconf_error_quark(void);
-static void gconf_set_error(GError **err, gint code, const gchar *fmt, ...);
-static char *gconf_strip_string(char *str);
-static int gconf_parse_int(const char *str);
-static double gconf_parse_float(const char *str);
-static gboolean gconf_parse_bool(const char *str);
-static GConfValueType gconf_parse_type(int chr);
-static const char *gconf_type_repr(GConfValueType type);
-static gboolean gconf_require_type(const char *key, const GConfValue *value, GConfValueType type, GError **err);
-static gboolean gconf_require_list_type(const char *key, const GConfValue *value, GConfValueType type, GError **err);
-gchar *gconf_concat_dir_and_key(const gchar *dir, const gchar *key);
+/* ------------------------------------------------------------------------- *
+ * Misc
+ * ------------------------------------------------------------------------- */
+
+static GQuark             gconf_error_quark          (void);
+static void               gconf_set_error            (GError **err, gint code, const gchar *fmt, ...);
+static char              *gconf_strip_string         (char *str);
+static char              *gconf_slice_string         (char **ppos, int ch);
+
+static int                gconf_parse_int            (const char *str);
+static double             gconf_parse_float          (const char *str);
+static gboolean           gconf_parse_bool           (const char *str);
+static GConfValueType     gconf_parse_type           (int chr);
+
+static const char        *gconf_bool_repr            (gboolean value);
+static const char        *gconf_type_repr            (GConfValueType type);
+static const char        *gconf_type_str             (GConfValueType type, GConfValueType list_type);
+
+static gboolean           gconf_require_type         (const char *key, const GConfValue *value, GConfValueType type, GError **err);
+static gboolean           gconf_require_list_type    (const char *key, const GConfValue *value, GConfValueType type, GError **err);
+
+gchar                    *gconf_concat_dir_and_key   (const gchar *dir, const gchar *key);
+
+/* ------------------------------------------------------------------------- *
+ * GConfValue
+ * ------------------------------------------------------------------------- */
+
 #if GCONF_ENABLE_DEBUG_LOGGING
-static char *gconf_value_repr(const char *key, GConfValue *self);
+static char              *gconf_value_repr           (const char *key, GConfValue *self);
 #endif
-static char *gconf_value_str(GConfValue *self);
-static void gconf_value_unset(GConfValue *self);
-static gboolean gconf_value_list_validata(GSList *src, GConfValueType type);
-static GSList *gconf_value_list_copy(GSList *src);
-static GSList *gconf_value_list_free(GSList *list);
-static void gconf_value_set_from_string(GConfValue *self, const char *data);
-static GConfValue *gconf_value_init(GConfValueType type, GConfValueType list_type, const char *data);
-GConfValue *gconf_value_copy(const GConfValue *src);
-GConfValue *gconf_value_new(GConfValueType type);
-void gconf_value_free(GConfValue *self);
-gboolean gconf_value_get_bool(const GConfValue *self);
-void gconf_value_set_bool(GConfValue *self, gboolean val);
-int gconf_value_get_int(const GConfValue *self);
-void gconf_value_set_int(GConfValue *self, gint val);
-double gconf_value_get_float(const GConfValue *self);
-void gconf_value_set_float(GConfValue *self, double val);
-const char *gconf_value_get_string(const GConfValue *self);
-void gconf_value_set_string(GConfValue *self, const char *val);
-GConfValueType gconf_value_get_list_type(const GConfValue *self);
-void gconf_value_set_list_type(GConfValue *self, GConfValueType list_type);
-GSList *gconf_value_get_list(const GConfValue *self);
-void gconf_value_set_list(GConfValue *self, GSList *list);
-static GConfEntry *gconf_entry_init(const char *key, const char *type, const char *data);
-static void gconf_entry_free(GConfEntry *self);
-static void gconf_entry_free_cb(gpointer self);
-const char *gconf_entry_get_key(const GConfEntry *entry);
-GConfValue *gconf_entry_get_value(const GConfEntry *entry);
+static char              *gconf_value_str            (const GConfValue *self);
+static void               gconf_value_unset          (GConfValue *self);
+static gboolean           gconf_value_list_validata  (GSList *src, GConfValueType type);
+static GSList            *gconf_value_list_copy      (GSList *src);
+static GSList            *gconf_value_list_free      (GSList *list);
+static void               gconf_value_set_from_string(GConfValue *self, const char *data);
+
+static GConfValue        *gconf_value_init           (GConfValueType type, GConfValueType list_type, const char *data);
+GConfValue               *gconf_value_copy           (const GConfValue *src);
+GConfValue               *gconf_value_new            (GConfValueType type);
+void                      gconf_value_free           (GConfValue *self);
+
+static bool               gconf_value_equal_types    (const GConfValue *self, const GConfValue *that);
+
+gboolean                  gconf_value_get_bool       (const GConfValue *self);
+void                      gconf_value_set_bool       (GConfValue *self, gboolean val);
+int                       gconf_value_get_int        (const GConfValue *self);
+void                      gconf_value_set_int        (GConfValue *self, gint val);
+double                    gconf_value_get_float      (const GConfValue *self);
+void                      gconf_value_set_float      (GConfValue *self, double val);
+const char               *gconf_value_get_string     (const GConfValue *self);
+void                      gconf_value_set_string     (GConfValue *self, const char *val);
+GConfValueType            gconf_value_get_list_type  (const GConfValue *self);
+void                      gconf_value_set_list_type  (GConfValue *self, GConfValueType list_type);
+GSList                   *gconf_value_get_list       (const GConfValue *self);
+void                      gconf_value_set_list       (GConfValue *self, GSList *list);
+
+/* ------------------------------------------------------------------------- *
+ * GConfEntry
+ * ------------------------------------------------------------------------- */
+
+static void               gconf_entry_free           (GConfEntry *self);
+static void               gconf_entry_free_cb        (gpointer self);
+static GConfEntry        *gconf_entry_init           (const char *key, const char *type, const char *data);
+
+const char               *gconf_entry_get_key        (const GConfEntry *entry);
+GConfValue               *gconf_entry_get_value      (const GConfEntry *entry);
+
+static void               gconf_entry_set_value_nocopy (GConfEntry *entry, GConfValue *value);
+static void               gconf_entry_set_value        (GConfEntry *entry, const GConfValue *value);
+
+static void               gconf_entry_set_def_from_current (GConfEntry *entry);
+static bool               gconf_entry_has_default_value    (const GConfEntry *entry);
+
+/* ------------------------------------------------------------------------- *
+ * GConfClient
+ * ------------------------------------------------------------------------- */
+
+static void               gconf_client_save_keys     (GConfClient *self, const char *path);
+static void               gconf_client_save_values   (GConfClient *self, const char *path);
+static void               gconf_client_load_values   (GConfClient *self, const char *path);
+
+static gboolean           gconf_client_is_valid      (GConfClient *self, GError **err);
 #if GCONF_ENABLE_DEBUG_LOGGING
-static void gconf_client_debug(GConfClient *self);
+static void               gconf_client_debug         (GConfClient *self);
 #endif
-GConfClient *gconf_client_get_default(void);
-static void gconf_client_free_default(void);
-void gconf_client_add_dir(GConfClient *client, const gchar *dir, GConfClientPreloadType preload, GError **err);
-static GConfEntry *gconf_client_find_entry(GConfClient *self, const gchar *key, GError **err);
-static GConfValue *gconf_client_find_value(GConfClient *self, const gchar *key, GError **err);
-GConfValue *gconf_client_get(GConfClient *self, const gchar *key, GError **err);
-static void gconf_client_notify_free(GConfClientNotify *self);
-static void gconf_client_notify_free_cb(gpointer self);
-static GConfClientNotify *gconf_client_notify_new(const gchar *namespace_section, GConfClientNotifyFunc func, gpointer user_data, GFreeFunc destroy_notify);
-static void gconf_client_notify_change(GConfClient *client, const gchar *namespace_section);
-guint gconf_client_notify_add(GConfClient *client, const gchar *namespace_section, GConfClientNotifyFunc func, gpointer user_data, GFreeFunc destroy_notify, GError **err);
-void gconf_client_notify_remove(GConfClient *client, guint cnxn);
-gboolean gconf_client_set_bool(GConfClient *client, const gchar *key, gboolean val, GError **err);
-gboolean gconf_client_set_int(GConfClient *client, const gchar *key, gint val, GError **err);
-gboolean gconf_client_set_float(GConfClient *client, const gchar *key, double val, GError **err);
-gboolean gconf_client_set_string(GConfClient *client, const gchar *key, const gchar *val, GError **err);
-gboolean gconf_client_set_list(GConfClient *client, const gchar *key, GConfValueType list_type, GSList *list, GError **err);
-void gconf_client_suggest_sync(GConfClient *client, GError **err);
+static int                gconf_client_glob_error_cb (const char *path, int err);
+static void               gconf_client_load_overrides(GConfClient *self);
+static void               gconf_client_mark_defaults (GConfClient *self);
+int                       gconf_client_reset_defaults(GConfClient *self, const char *keyish);
+
+static bool               gconf_client_add_entry     (GConfClient *self, const gchar *key, GConfValue *val);
+gboolean                  gconf_client_add_bool      (GConfClient *self, const gchar *key, gboolean val);
+gboolean                  gconf_client_add_int       (GConfClient *self, const gchar *key, gint val);
+gboolean                  gconf_client_add_float     (GConfClient *self, const gchar *key, double val);
+gboolean                  gconf_client_add_string    (GConfClient *self, const gchar *key, const gchar *val);
+gboolean                  gconf_client_add_list      (GConfClient *self, const gchar *key, GConfValueType list_type, GSList *list);
+
+static void               gconf_client_load_keyfile  (GConfClient *self, const char *path, bool is_custom);
+static void               gconf_client_load_keyfiles (GConfClient *self);
+static void               gconf_client_save_now      (GConfClient *self);
+static gboolean           gconf_client_save_cb       (gpointer aptr);
+static void               gconf_client_forced_save   (GConfClient *self);
+static void               gconf_client_delayed_save  (GConfClient *self);
+
+static GConfClient       *gconf_client_init          (void);
+static void               gconf_client_free          (GConfClient *self);
+
+static void               gconf_client_free_default  (void);
+GConfClient              *gconf_client_get_default   (void);
+
+void                      gconf_client_add_dir       (GConfClient *client, const gchar *dir, GConfClientPreloadType preload, GError **err);
+static GConfEntry        *gconf_client_find_entry    (GConfClient *self, const gchar *key, GError **err);
+static GConfValue        *gconf_client_find_value    (GConfClient *self, const gchar *key, GError **err);
+GConfValue               *gconf_client_get           (GConfClient *self, const gchar *key, GError **err);
+gboolean                  gconf_client_set_bool      (GConfClient *client, const gchar *key, gboolean val, GError **err);
+gboolean                  gconf_client_set_int       (GConfClient *client, const gchar *key, gint val, GError **err);
+gboolean                  gconf_client_set_float     (GConfClient *client, const gchar *key, double val, GError **err);
+gboolean                  gconf_client_set_string    (GConfClient *client, const gchar *key, const gchar *val, GError **err);
+gboolean                  gconf_client_set_list      (GConfClient *client, const gchar *key, GConfValueType list_type, GSList *list, GError **err);
+
+void                      gconf_client_suggest_sync  (GConfClient *client, GError **err);
+
+static void               gconf_client_notify_free   (GConfClientNotify *self);
+static void               gconf_client_notify_free_cb(gpointer self);
+static GConfClientNotify *gconf_client_notify_new    (const gchar *namespace_section, GConfClientNotifyFunc func, gpointer user_data, GFreeFunc destroy_notify);
+static void               gconf_signal_value_change  (GConfEntry *entry);
+static void               gconf_client_notify_change (GConfClient *client, const gchar *namespace_section);
+guint                     gconf_client_notify_add    (GConfClient *client, const gchar *namespace_section, GConfClientNotifyFunc func, gpointer user_data, GFreeFunc destroy_notify, GError **err);
+void                      gconf_client_notify_remove (GConfClient *client, guint cnxn);
 
 /* ========================================================================= *
  *
@@ -234,6 +305,23 @@ static char *gconf_strip_string(char *str)
   return str;
 }
 
+static char *gconf_slice_string(char **ppos, int ch)
+{
+  char *beg = *ppos;
+  char *end = beg;
+
+  for( ; *end; ++end )
+  {
+    if( *end == ch ) {
+      *end++ = 0;
+      break;
+    }
+  }
+  *ppos = end;
+
+  return gconf_strip_string(beg);
+}
+
 /** Array of strings we accept as: boolean true */
 static const char * const gconf_true_lut[] = { "true", "t", "yes", "y", 0 };
 
@@ -322,6 +410,35 @@ gconf_bool_repr(gboolean value)
   return value ? *gconf_true_lut : *gconf_false_lut;
 }
 #endif
+
+static
+const char *
+gconf_type_str(GConfValueType type, GConfValueType list_type)
+{
+  const char *res = 0;
+
+  switch( type )
+  {
+  case GCONF_VALUE_STRING:  res = "s"; break;
+  case GCONF_VALUE_INT:     res = "i"; break;
+  case GCONF_VALUE_FLOAT:   res = "f"; break;
+  case GCONF_VALUE_BOOL:    res = "b"; break;
+
+  case GCONF_VALUE_LIST:
+    switch( list_type ) {
+    case GCONF_VALUE_STRING: res = "as"; break;
+    case GCONF_VALUE_INT:    res = "ai"; break;
+    case GCONF_VALUE_FLOAT:  res = "af"; break;
+    case GCONF_VALUE_BOOL:   res = "ab"; break;
+    default: break;
+    }
+    break;
+
+  default: break;
+  }
+
+  return res;
+}
 
 /** GConfValueType to text helper */
 static
@@ -518,7 +635,7 @@ cleanup:
  */
 static
 char *
-gconf_value_str(GConfValue *self)
+gconf_value_str(const GConfValue *self)
 {
   char   *data = 0;
   size_t  size = 0;
@@ -813,6 +930,14 @@ gconf_value_new(GConfValueType type)
   return gconf_value_init(type, GCONF_VALUE_INVALID, 0);
 }
 
+static bool
+gconf_value_equal_types(const GConfValue *self, const GConfValue *that)
+{
+  return (self && that &&
+          self->type == that->type &&
+          self->list_type == that->list_type);
+}
+
 /** See GConf API documentation */
 void
 gconf_value_free(GConfValue *self)
@@ -993,6 +1118,7 @@ gconf_entry_free(GConfEntry *self)
   {
     gconf_value_free(self->value);
     free(self->key);
+    free(self->typ);
     free(self->def);
     free(self);
   }
@@ -1012,7 +1138,11 @@ gconf_entry_init(const char *key, const char *type, const char *data)
 {
   GConfEntry *self = calloc(1, sizeof *self);
   self->key = strdup(key);
+  self->typ = strdup(type);
   self->def = data ? strdup(data) : 0;
+
+  self->is_custom = false;
+  self->in_use    = false;
 
   GConfValueType ltype = GCONF_VALUE_INVALID;
   GConfValueType vtype = gconf_parse_type(type[0]);
@@ -1038,6 +1168,55 @@ GConfValue *
 gconf_entry_get_value(const GConfEntry *entry)
 {
   return entry ? entry->value : 0;
+}
+
+static void gconf_entry_set_value_nocopy(GConfEntry *entry,
+                                         GConfValue *value)
+{
+  if( !gconf_value_equal_types(entry->value, value) ) {
+    goto EXIT;
+  }
+
+  gconf_value_free(entry->value);
+  entry->value = value, value = 0;
+
+EXIT:
+  gconf_value_free(value);
+}
+
+static void gconf_entry_set_value(GConfEntry *entry,
+                                  const GConfValue *value)
+{
+  gconf_entry_set_value_nocopy(entry,
+                               gconf_value_copy(value));
+}
+
+static bool gconf_entry_has_default_value(const GConfEntry *entry)
+{
+  char *def = gconf_value_str(entry->value);
+  bool  res = def && entry->def && !strcmp(def, entry->def);
+  free(def);
+
+  return res;
+}
+
+static void gconf_entry_set_def_from_value(GConfEntry *entry,
+                                           const GConfValue *value)
+{
+  if( entry && value )
+  {
+    free(entry->def);
+    entry->def = gconf_value_str(value);
+    gconf_log_debug("CUSTOM %s - %s - %s",entry->key, entry->typ, entry->def);
+  }
+}
+
+static void gconf_entry_set_def_from_current(GConfEntry *entry)
+{
+  if( entry && entry->value )
+  {
+    gconf_entry_set_def_from_value(entry, entry->value);
+  }
 }
 
 /* ========================================================================= *
@@ -1526,12 +1705,12 @@ static const setting_t gconf_defaults[] =
     .type = "b",
     .def  = "true",
   },
-  {
-    // no define; used by the CSD app
-    .key  = "/system/osso/dsm/leds/PatternCsdWhite",
-    .type = "b",
-    .def  = "true",
-  },
+// QUARANTINE   {
+// QUARANTINE     // no define; used by the CSD app
+// QUARANTINE     .key  = "/system/osso/dsm/leds/PatternCsdWhite",
+// QUARANTINE     .type = "b",
+// QUARANTINE     .def  = "true",
+// QUARANTINE   },
   {
     // no define; used by mce display module
     .key  = "/system/osso/dsm/leds/PatternDisplayBlankFailed",
@@ -1794,6 +1973,55 @@ static GConfClient *default_client = 0;
 /** Lookup table for latest change signals sent */
 static GHashTable *gconf_signal_sent = 0;
 
+/** Save custom keys to persistent storage file */
+static void gconf_client_save_keys(GConfClient *self, const char *path)
+{
+  char   *data = 0;
+  size_t  size = 0;
+  FILE   *file = 0;
+
+  mce_log(LL_INFO, "updating %s", path);
+
+  if( !(file = open_memstream(&data, &size)) ) {
+    goto cleanup;
+  }
+
+  for( GSList *e_iter = self->entries; e_iter; e_iter = e_iter->next )
+  {
+    GConfEntry *entry = e_iter->data;
+
+    if( !entry->is_custom )
+    {
+      continue;
+    }
+
+    if( !entry->in_use )
+    {
+      mce_log(LL_DEBUG, "skip %s", entry->key);
+      continue;
+    }
+
+    mce_log(LL_DEBUG, "save %s", entry->key);
+    fprintf(file, "%s:%s=%s\n", entry->key, entry->typ, entry->def);
+  }
+
+  // the data pointer gets set at fclose()
+  fclose(file), file = 0;
+
+  if( data )
+  {
+    mce_io_update_file_atomic(path, data, size, 0664, FALSE);
+  }
+
+cleanup:
+
+  if( file ) fclose(file);
+
+  free(data);
+
+  return;
+}
+
 /** Save values to persistent storage file */
 static void gconf_client_save_values(GConfClient *self, const char *path)
 {
@@ -1821,7 +2049,12 @@ static void gconf_client_save_values(GConfClient *self, const char *path)
     /* Omit values that do not differ from defaults */
     if( !entry->def || strcmp(entry->def, str) )
     {
-      fprintf(file, "%s=%s\n", entry->key, str);
+      if( entry->is_custom && !entry->in_use ) {
+        mce_log(LL_DEBUG, "skip %s", entry->key);
+      }
+      else {
+        fprintf(file, "%s=%s\n", entry->key, str);
+      }
     }
     free(str);
   }
@@ -1871,9 +2104,14 @@ static void gconf_client_load_values(GConfClient *self, const char *path)
       gconf_strip_string(key);
       gconf_strip_string(val);
 
-      if( (entry = gconf_client_find_entry(self, key, &err)) ) {
-        gconf_value_set_from_string(entry->value, val);
+      if( !(entry = gconf_client_find_entry(self, key, &err)) )
+      {
+        entry = gconf_entry_init(key, "b", "false");
+        self->entries = g_slist_append(self->entries, entry);
       }
+
+      gconf_value_set_from_string(entry->value, val);
+
       g_clear_error(&err);
     }
   }
@@ -2026,17 +2264,325 @@ int gconf_client_reset_defaults(GConfClient *self, const char *keyish)
   return result;
 }
 
+/** Add/update custom entry
+ *
+ * If entry by the given name does not exist yet, a custom entry will be
+ * created and set to the value given.
+ *
+ * If custom entry already exists and it does not differ from the old
+ * default, it will be set to the given value.
+ *
+ * If custom entry already exists and it differs from the old default,
+ * only the default value is updated.
+ *
+ * Note: Overriding defaults for hard coded entries is not possible.
+ *
+ * @param self  client object
+ * @param key   entry name
+ * @param val   entry default value
+ *
+ * @return true if value was set, false otherwise
+ */
+static bool gconf_client_add_entry(GConfClient *self, const gchar *key, GConfValue *val)
+{
+  bool        changed = false;
+  GError     *err   = 0;
+  GConfEntry *entry = gconf_client_find_entry(self, key, &err);
+
+  if( !entry ) {
+    /* Entry does not exist yet, use the default value as is */
+
+    mce_log(LL_CRIT, "NEW custom key tagged: %s", key);
+    const char *type = gconf_type_str(val->type, val->list_type);
+    entry = gconf_entry_init(key, type, 0);
+    entry->is_custom = true;
+    entry->in_use    = true;
+
+    self->entries = g_slist_append(self->entries, entry);
+
+    gconf_entry_set_value(entry, val);
+    gconf_entry_set_def_from_current(entry);
+    changed = true;
+  }
+  else if( entry->is_custom ) {
+    mce_log(LL_CRIT, "OLD custom key tagged: %s", key);
+    entry->in_use    = true;
+
+    if( gconf_entry_has_default_value(entry) ) {
+      /* Existing value is at old default, switch to
+       * the new default */
+      gconf_entry_set_value(entry, val);
+      gconf_entry_set_def_from_current(entry);
+    }
+    else {
+      /* Existing value differs from the old default,
+       * just update the default */
+      gconf_entry_set_def_from_value(entry, val);
+    }
+  }
+  else {
+    mce_log(LL_CRIT, "OLD builtin key ignored: %s", key);
+  }
+
+  g_clear_error(&err);
+
+  return changed;
+}
+
+/** Add/update custom boolean entry
+ *
+ * See #gconf_client_add_entry() for details.
+ *
+ * @param self  client object
+ * @param key   entry name
+ * @param val   entry default value
+ *
+ * @return true if value was set, false otherwise
+ */
+gboolean gconf_client_add_bool(GConfClient *self, const gchar *key, gboolean val)
+{
+  GConfValue *value = gconf_value_init(GCONF_VALUE_BOOL, GCONF_VALUE_INVALID, 0);
+  gconf_value_set_bool(value, val);
+  bool added = gconf_client_add_entry(self, key, value);
+  gconf_value_free(value);
+
+  return added;
+}
+
+/** Add/update custom integer entry
+ *
+ * See #gconf_client_add_entry() for details.
+ *
+ * @param self  client object
+ * @param key   entry name
+ * @param val   entry default value
+ *
+ * @return true if value was set, false otherwise
+ */
+gboolean gconf_client_add_int(GConfClient *self, const gchar *key, gint val)
+{
+  GConfValue *value = gconf_value_init(GCONF_VALUE_INT, GCONF_VALUE_INVALID, 0);
+  gconf_value_set_int(value, val);
+  bool added = gconf_client_add_entry(self, key, value);
+  gconf_value_free(value);
+
+  return added;
+}
+
+/** Add/update custom floating point entry
+ *
+ * See #gconf_client_add_entry() for details.
+ *
+ * @param self  client object
+ * @param key   entry name
+ * @param val   entry default value
+ *
+ * @return true if value was set, false otherwise
+ */
+gboolean gconf_client_add_float(GConfClient *self, const gchar *key, double val)
+{
+  GConfValue *value = gconf_value_init(GCONF_VALUE_FLOAT, GCONF_VALUE_INVALID, 0);
+  gconf_value_set_float(value, val);
+  bool added = gconf_client_add_entry(self, key, value);
+  gconf_value_free(value);
+
+  return added;
+}
+
+/** Add/update custom string entry
+ *
+ * See #gconf_client_add_entry() for details.
+ *
+ * @param self  client object
+ * @param key   entry name
+ * @param val   entry default value
+ *
+ * @return true if value was set, false otherwise
+ */
+gboolean gconf_client_add_string(GConfClient *self, const gchar *key, const char *val)
+{
+  GConfValue *value = gconf_value_init(GCONF_VALUE_STRING, GCONF_VALUE_INVALID, 0);
+  gconf_value_set_string(value, val);
+  bool added = gconf_client_add_entry(self, key, value);
+  gconf_value_free(value);
+
+  return added;
+}
+
+/** Add/update custom string entry
+ *
+ * See #gconf_client_add_entry() for details.
+ *
+ * @param self       client object
+ * @param key        entry name
+ * @param list_type  type of entries in the list
+ * @param list       entry default value
+ *
+ * @return true if value was set, false otherwise
+ */
+gboolean gconf_client_add_list(GConfClient *self, const gchar *key, GConfValueType list_type, GSList *list)
+{
+  GConfValue *value = gconf_value_init(GCONF_VALUE_LIST, list_type, 0);
+  gconf_value_set_list(value, list);
+  bool added = gconf_client_add_entry(self, key, value);
+  gconf_value_free(value);
+
+  return added;
+}
+
+/** Load custom keys from persistent storage file */
+static void gconf_client_load_keyfile(GConfClient *self,
+                                      const char *path,
+                                      bool is_custom)
+{
+  FILE  *file = 0;
+  char  *buff = 0;
+  size_t size = 0;
+
+  mce_log(LL_NOTICE, "loading %s", path);
+
+  if( !(file = fopen(path, "r")) ) {
+    if( errno != ENOENT ) {
+      mce_log(LL_ERR, "fopen(%s): %m", path);
+    }
+    goto EXIT;
+  }
+
+  while( getline(&buff, &size, file) >= 0 ) {
+    // "<key>:<type>=<def>"
+    char *pos = buff;
+
+    char *key = gconf_slice_string(&pos, ':');
+
+    if( *key == 0 || *key == '#' ) continue;
+
+    char *typ = gconf_slice_string(&pos, '=');
+
+    if( *typ == 0 ) continue;
+
+    char *def = gconf_strip_string(pos);
+
+    GError *err = 0;
+    GConfEntry *entry;
+
+    if( !(entry = gconf_client_find_entry(self, key, &err)) )
+    {
+      entry = gconf_entry_init(key, typ, def);
+      entry->is_custom = is_custom;
+      entry->in_use    = false;
+
+      self->entries = g_slist_append(self->entries, entry);
+    }
+
+    g_clear_error(&err);
+  }
+
+EXIT:
+  free(buff);
+  if( file ) fclose(file);
+  return;
+}
+
+/** Process config data from /etc/mce/NN.xxx.keys files
+ */
+static void gconf_client_load_keyfiles(GConfClient *self)
+{
+  static const char pattern[] = MCE_CONF_DIR"/[0-9][0-9]*.keys";
+
+  glob_t gb;
+
+  memset(&gb, 0, sizeof gb);
+
+  if( glob(pattern, 0, gconf_client_glob_error_cb, &gb) != 0 )
+  {
+    mce_log(LL_NOTICE, "no mce config override files found");
+    goto cleanup;
+  }
+
+  for( size_t i = 0; i < gb.gl_pathc; ++i )
+  {
+    const char *path = gb.gl_pathv[i];
+    gconf_client_load_keyfile(self, path, false);
+  }
+
+cleanup:
+
+  globfree(&gb);
+}
+
+static void     gconf_client_save_now(GConfClient *self)
+{
+  /* Cancel pending delayed save */
+  if( self->pending_save_id ) {
+    g_source_remove(self->pending_save_id);
+    self->pending_save_id = 0;
+  }
+
+  /* Save custom entry defaults */
+  gconf_client_save_keys(self, CUSTOM_PATH);
+
+  /* Save values that differ from defaults */
+  gconf_client_save_values(self, VALUES_PATH);
+}
+
+static gboolean gconf_client_save_cb(gpointer aptr)
+{
+  GConfClient *self = aptr;
+
+  if( self->pending_save_id ) {
+    self->pending_save_id = 0;
+    gconf_client_save_now(self);
+  }
+
+  return FALSE;
+}
+
+static void gconf_client_forced_save(GConfClient *self)
+{
+  if( self->pending_save_id ) {
+    gconf_client_save_now(self);
+  }
+}
+
+static void gconf_client_delayed_save(GConfClient *self)
+{
+  if( !self->pending_save_id ) {
+    self->pending_save_id = g_idle_add(gconf_client_save_cb, self);
+  }
+}
+
+static GConfClient *gconf_client_init(void)
+{
+  GConfClient *self = calloc(1, sizeof *self);
+
+  self->entries         = 0;
+  self->notify_list     = 0;
+  self->pending_save_id = 0;
+
+  return self;
+}
+
+static void gconf_client_free(GConfClient *self)
+{
+  if( self )
+  {
+    gconf_client_forced_save(self);
+
+    g_slist_free_full(self->entries,
+                      gconf_entry_free_cb);
+
+    g_slist_free_full(self->notify_list,
+                      gconf_client_notify_free_cb);
+
+    free(self);
+  }
+}
+
 static void gconf_client_free_default(void)
 {
   if( default_client )
   {
-    g_slist_free_full(default_client->entries,
-                      gconf_entry_free_cb);
-
-    g_slist_free_full(default_client->notify_list,
-                      gconf_client_notify_free_cb);
-
-    free(default_client), default_client = 0;
+    gconf_client_free(default_client), default_client = 0;
   }
 
   if( gconf_signal_sent )
@@ -2051,7 +2597,7 @@ gconf_client_get_default(void)
 {
   if( default_client == 0 )
   {
-    GConfClient *self = calloc(1, sizeof *self);
+    GConfClient *self = gconf_client_init();
 
     // initialize to hard coded defaults
     for( const setting_t *elem = gconf_defaults; elem->key; ++elem )
@@ -2066,6 +2612,10 @@ gconf_client_get_default(void)
     default_client = self;
     atexit(gconf_client_free_default);
 
+    // append custom key defaults
+    gconf_client_load_keyfiles(self);
+    gconf_client_load_keyfile(self, CUSTOM_PATH, true);
+
     // override hard coded defaults via /etc/nn.*.conf
     gconf_client_load_overrides(self);
 
@@ -2076,7 +2626,7 @@ gconf_client_get_default(void)
     gconf_client_load_values(self, VALUES_PATH);
 
     // save back - will be nop unless defaults have changed since last save
-    gconf_client_save_values(self, VALUES_PATH);
+    gconf_client_delayed_save(self);
 
 #if GCONF_ENABLE_DEBUG_LOGGING
     if( gconf_log_debug_p() )
@@ -2149,6 +2699,58 @@ gconf_client_find_value(GConfClient *self, const gchar *key, GError **err)
   GConfEntry *entry = gconf_client_find_entry(self, key, err);
   return entry ? entry->value : 0;
 }
+
+#ifdef DEAD_CODE
+/** See GConf API documentation */
+void
+gconf_client_set(GConfClient *self, const gchar *key,
+                 const GConfValue *val, GError **err)
+{
+// QUARANTINE     // initialize to hard coded defaults
+// QUARANTINE     for( const setting_t *elem = gconf_defaults; elem->key; ++elem )
+// QUARANTINE     {
+// QUARANTINE       GConfEntry *add = gconf_entry_init(elem->key, elem->type, elem->def);
+// QUARANTINE       self->entries = g_slist_prepend(self->entries, add);
+// QUARANTINE     }
+  // QUARANTINE     self->entries = g_slist_reverse(self->entries);
+
+// QUARANTINE   gconf_client_get();
+
+// QUARANTINE       if( (entry = gconf_client_find_entry(self, key, &err)) ) {
+// QUARANTINE         gconf_value_set_from_string(entry->value, val);
+// QUARANTINE       }
+
+  GConfEntry *entry = 0;
+
+  if( (entry = gconf_client_find_entry(self, key, err)) )
+  {
+    if( entry->value && entry->value->type != val->type )
+    {
+      // TODO: set error
+      goto cleanup;
+    }
+    gconf_value_free(self->value);
+    self->value = gconf_value_copy(val);
+  }
+  else
+  {
+  }
+
+    if( val ) {
+      GError *err = 0;
+
+      *val++ = 0;
+      gconf_strip_string(key);
+      gconf_strip_string(val);
+
+      if( (entry = gconf_client_find_entry(self, key, &err)) ) {
+        gconf_value_set_from_string(entry->value, val);
+      }
+      g_clear_error(&err);
+    }
+
+}
+#endif
 
 /** See GConf API documentation */
 GConfValue *
@@ -2330,8 +2932,7 @@ void
 gconf_client_suggest_sync(GConfClient *client, GError **err)
 {
   if( gconf_client_is_valid(client, err) ) {
-    // FIXME: do we need delayed save?
-    gconf_client_save_values(client, VALUES_PATH);
+    gconf_client_delayed_save(client);
   }
 }
 
