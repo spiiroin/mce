@@ -75,6 +75,17 @@ G_MODULE_EXPORT module_info_struct module_info = {
 	.priority = 100
 };
 
+/** Hybris pattern config slot indices */
+enum {
+	IDX_PRIO,       /* Pattern priority field */
+	IDX_SCREEN_ON,  /* Pattern screen display policy field */
+	IDX_TIMEOUT,    /* Pattern timeout field */
+	IDX_ON_PERIOD,  /* On-period field */
+	IDX_OFF_PERIOD, /* Off-period field */
+	IDX_COLOR,      /* LED color field */
+	IDX_NUMOF
+};
+
 /** The pattern queue */
 static GQueue *pattern_stack = NULL;
 /** The pattern combination rule queue */
@@ -155,6 +166,7 @@ typedef struct {
 	/** Pattern for the B-channel */
 	gchar channel3[CHANNEL_SIZE + 1];
 	guint enabled_gconf_id;		/**< Callback ID for GConf entry */
+	guint pattern_gconf_id;		/**< Callback ID for GConf entry */
 	guint rgb_color;                /**< RGB24 data for libhybris use */
 	gboolean undecided;		/**< Flag for policy=6 lock in */
 } pattern_struct;
@@ -364,7 +376,12 @@ static gboolean          init_mono_patterns             (void);
 static int               list_compare_item              (const void *a, const void *b);
 static void              list_remove_duplicates         (gchar **list);
 static gboolean          list_includes_item             (gchar **list, const gchar *elem);
+
+static void              sanitize_hybris_pattern        (pattern_struct *psp);
+static gint              hybris_pattern_find_cb(gconstpointer data, gconstpointer userdata);
+static void              hybris_pattern_gconf_cb(GConfClient *const gcc, const guint id, GConfEntry *const entry, gpointer const data);
 static gboolean          init_hybris_patterns           (void);
+
 static gboolean          init_patterns                  (void);
 static void              sw_breathing_rethink           (void);
 static void              sw_breathing_gconf_cb          (GConfClient *const gcc, const guint id, GConfEntry *const entry, gpointer const data);
@@ -927,6 +944,7 @@ static pattern_struct *led_pattern_create(void)
 	self->name             = 0;
 	self->timeout_id       = 0;
 	self->enabled_gconf_id = 0;
+	self->pattern_gconf_id = 0;
 
 EXIT:
 	return self;
@@ -943,6 +961,7 @@ static void led_pattern_delete(pattern_struct *self)
 
 	mce_hbtimer_delete(self->timeout_id);
 	mce_gconf_notifier_remove(self->enabled_gconf_id);
+	mce_gconf_notifier_remove(self->pattern_gconf_id);
 	free(self->name);
 
 	g_slice_free(pattern_struct, self);
@@ -1898,8 +1917,7 @@ static gint pattern_enabled_find_cb(gconstpointer data, gconstpointer userdata)
 	return psp->enabled_gconf_id != *idp;
 }
 
-/**
- * GConf callback for LED related settings
+/** GConf callback for LED enabled settings
  *
  * @param gcc Unused
  * @param id Connection ID from gconf_client_notify_add()
@@ -2682,6 +2700,135 @@ static gboolean list_includes_item(gchar **list, const gchar *elem)
 
 #define LED_ZZZ_PREFIX "/system/osso/dsm/leds/patterns"
 
+static void sanitize_hybris_pattern(pattern_struct *psp)
+{
+	if( !psp )
+		goto EXIT;
+
+	/* Cap priority to [0, 255] range */
+	if( psp->priority < 0 )
+		psp->priority = 0;
+	if( psp->priority > 255 )
+		psp->priority = 255;
+
+	/* Invalid policy -> "only when screen is off" */
+	if( psp->policy < 0 || psp->policy > 7 )
+		psp->policy = 0;
+
+	/* Cap timeout minimum to zero */
+	if( psp->timeout < 0 )
+		psp->timeout = 0;
+
+	/* Cap on_period minimum to zero */
+	if( psp->on_period < 0 )
+		psp->on_period = 0;
+
+	/* Cap off_period minimum to zero */
+	if( psp->off_period < 0 )
+		psp->off_period = 0;
+
+	/* Invalid color -> white */
+	if( psp->rgb_color <= 0x000000 || psp->rgb_color > 0xffffff )
+		psp->rgb_color = 0xffffff;
+EXIT:
+	return;
+}
+
+/** Custom find function to get a GConf callback ID in the pattern stack
+ *
+ * @param data The pattern_struct entry
+ * @param userdata The pattern name
+ * @return 0 if the GConf callback id of data matches that of userdata,
+ *         -1 if they don't match
+ */
+static gint hybris_pattern_find_cb(gconstpointer data, gconstpointer userdata)
+{
+	const pattern_struct *psp = data;
+	const guint          *idp = userdata;
+
+	if( !psp || !idp )
+		return -1;
+
+	return psp->pattern_gconf_id != *idp;
+}
+
+/** GConf callback for hybris LED pattern settings
+ *
+ * @param gcc   gconf client object (unused)
+ * @param id    gconf notification id
+ * @param entry modified gconf entry object
+ * @param data  user data (unused)
+ */
+static void hybris_pattern_gconf_cb(GConfClient *const gcc, const guint id,
+				     GConfEntry *const entry, gpointer const data)
+{
+	(void)gcc;
+	(void)data;
+
+	GSList *value_list  = 0;
+	GSList *string_list = 0;
+	gsize   count       = 0;
+	gchar **array       = 0;
+
+	/* Get changed gconf value */
+	const GConfValue *gcv = gconf_entry_get_value(entry);
+	if( !gcv ) {
+		mce_log(LL_DEBUG, "GConf Key `%s' has been unset",
+			gconf_entry_get_key(entry));
+		goto EXIT;
+	}
+
+	/* Locate led pattern associated with the gconf value */
+	GList *glp = g_queue_find_custom(pattern_stack, &id,
+					 hybris_pattern_find_cb);
+
+	if( !glp ) {
+		mce_log(LL_WARN, "Spurious GConf value received; confused!");
+		goto EXIT;
+	}
+	pattern_struct *psp = glp->data;
+
+	mce_log(LL_CRIT, "LED pattern %s changed", psp->name);
+
+	/* Get borrowed list of gconf values */
+	if( !(value_list = gconf_value_get_list(gcv)) )
+		goto EXIT;
+
+	/* Translate gconf value list to array of strings */
+	if( !(string_list = mce_gconf_value_list_to_string_list(value_list)) )
+		goto EXIT;
+
+	array = mce_gconf_string_list_to_array(string_list, &count);
+
+	if( count != IDX_NUMOF ) {
+		mce_log(LL_ERR,"Invalid setting for LED pattern %s",
+			psp->name);
+		goto EXIT;
+	}
+
+	/* Update pattern config */
+	psp->priority   = strtol(array[IDX_PRIO], 0, 0);
+	psp->policy     = strtol(array[IDX_SCREEN_ON], 0, 0);
+	psp->timeout    = strtol(array[IDX_TIMEOUT], 0, 0) ?: -1;
+	psp->on_period  = strtol(array[IDX_ON_PERIOD], 0, 0);
+	psp->off_period = strtol(array[IDX_OFF_PERIOD], 0, 0);
+	psp->rgb_color  = strtol(array[IDX_COLOR], 0, 16);
+
+	sanitize_hybris_pattern(psp);
+
+	/* Re-evaluate active pattern */
+	if( active_pattern == psp ) {
+		led_set_active_pattern(0);
+		led_set_active_pattern(psp);
+	}
+
+EXIT:
+	g_strfreev(array);
+	g_slist_free(string_list);
+
+	return;
+}
+
 /**
  * Init patterns for libhybris-LED
  *
@@ -2689,16 +2836,6 @@ static gboolean list_includes_item(gchar **list, const gchar *elem)
  */
 static gboolean init_hybris_patterns(void)
 {
-	enum {
-		IDX_PRIO,       /* Pattern priority field */
-		IDX_SCREEN_ON,  /* Pattern screen display policy field */
-		IDX_TIMEOUT,    /* Pattern timeout field */
-		IDX_ON_PERIOD,  /* On-period field */
-		IDX_OFF_PERIOD, /* Off-period field */
-		IDX_COLOR,      /* LED color field */
-		IDX_NUMOF
-	};
-
 	gboolean  status  = FALSE;
 	gchar   **require = NULL;
 	gchar   **disable = NULL;
@@ -2788,15 +2925,22 @@ static gboolean init_hybris_patterns(void)
 			pattern_struct *psp = led_pattern_create();
 
 			psp->name       = strdup(name);
+			psp->active     = FALSE;
+			psp->enabled    = pattern_get_enabled(name,
+							      &psp->enabled_gconf_id);
+
 			psp->priority   = strtol(v[IDX_PRIO], 0, 0);
 			psp->policy     = strtol(v[IDX_SCREEN_ON], 0, 0);
 			psp->timeout    = strtol(v[IDX_TIMEOUT], 0, 0) ?: -1;
 			psp->on_period  = strtol(v[IDX_ON_PERIOD], 0, 0);
 			psp->off_period = strtol(v[IDX_OFF_PERIOD], 0, 0);
 			psp->rgb_color  = strtol(v[IDX_COLOR], 0, 16);
-			psp->active     = FALSE;
-			psp->enabled    = pattern_get_enabled(name,
-							      &psp->enabled_gconf_id);
+
+			sanitize_hybris_pattern(psp);
+
+			mce_gconf_notifier_add(LED_ZZZ_PREFIX, key,
+					       hybris_pattern_gconf_cb,
+					       &psp->pattern_gconf_id);
 
 			g_queue_insert_sorted(pattern_stack, psp,
 					      queue_prio_compare,

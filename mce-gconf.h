@@ -57,4 +57,8 @@ gboolean mce_gconf_add_string      (const gchar *const key, const char *def);
 gboolean mce_gconf_add_string_list (const gchar *const key, GSList *values);
 gboolean mce_gconf_add_string_array(const gchar *const key, gchar **array);
 
+GSList *mce_gconf_value_list_to_string_list(GSList *value_list);
+gchar **mce_gconf_string_list_to_array(GSList *list, gsize *pcount);
+GSList *mce_gconf_string_array_to_list(gchar **array);
+
 #endif /* _MCE_GCONF_H_ */

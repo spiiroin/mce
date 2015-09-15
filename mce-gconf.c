@@ -33,7 +33,7 @@ static gboolean gconf_disabled = FALSE;
 /** List of GConf notifiers */
 static GSList *gconf_notifiers = NULL;
 
-static gchar **string_list_to_array(GSList *list, gsize *pcount)
+gchar **mce_gconf_string_list_to_array(GSList *list, gsize *pcount)
 {
 	gsize   count = g_slist_length(list);
 	gchar  **array = g_malloc((count+1) * sizeof *array);
@@ -49,7 +49,7 @@ static gchar **string_list_to_array(GSList *list, gsize *pcount)
 	return array;
 }
 
-static GSList *string_array_to_list(gchar **array)
+GSList *mce_gconf_string_array_to_list(gchar **array)
 {
 	GSList *list = 0;
 	for( size_t i = 0; array[i]; ++i )
@@ -57,6 +57,20 @@ static GSList *string_array_to_list(gchar **array)
 	list = g_slist_reverse(list);
 	return list;
 
+}
+
+GSList *mce_gconf_value_list_to_string_list(GSList *value_list)
+{
+	GSList *string_list = 0;
+
+	for( ; value_list; value_list = value_list->next ) {
+		GConfValue *val = value_list->data;
+		const char *str = gconf_value_get_string(val);;
+		string_list = g_slist_prepend(string_list, (char *)str);
+	}
+	string_list = g_slist_reverse(string_list);
+
+	return string_list;
 }
 
 /** Check if gconf-key exists
@@ -160,7 +174,7 @@ EXIT:
 
 gboolean mce_gconf_add_string_array(const gchar *const key, gchar **array)
 {
-	GSList *list = string_array_to_list(array);
+	GSList *list = mce_gconf_string_array_to_list(array);
 	gboolean success = mce_gconf_add_string_list(key, list);
 	g_slist_free(list);
 	return success;
@@ -443,7 +457,7 @@ gboolean mce_gconf_get_string_array(const gchar *key, gchar ***parray, gsize *pc
 	if( !mce_gconf_get_string_list(key, &list) )
 		goto EXIT;
 
-	if( !(array = string_list_to_array(list, &count)) )
+	if( !(array = mce_gconf_string_list_to_array(list, &count)) )
 		goto EXIT;
 
 	*parray = array,
@@ -453,8 +467,8 @@ gboolean mce_gconf_get_string_array(const gchar *key, gchar ***parray, gsize *pc
 	success = TRUE;
 
 EXIT:
-	g_slist_free(list);
 	g_strfreev(array);
+	g_slist_free(list);
 
 	return success;
 }
