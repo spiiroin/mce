@@ -1413,11 +1413,13 @@ static void led_update_active_pattern(void)
 
 		new_active_pattern = iter->data;
 
+#if 0
 		mce_log(LL_DEBUG,
 			"pattern: %s, active: %d, enabled: %d",
 			new_active_pattern->name,
 			new_active_pattern->active,
 			new_active_pattern->enabled);
+#endif
 
 		/* If the pattern is deactivated, ignore */
 		if (new_active_pattern->active == FALSE)
