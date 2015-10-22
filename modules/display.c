@@ -34,6 +34,7 @@
 #ifdef ENABLE_HYBRIS
 # include "../mce-hybris.h"
 #endif
+#include "../mce-worker.h"
 
 #include "../filewatcher.h"
 
@@ -6417,6 +6418,41 @@ static bool mdy_stm_is_late_suspend_allowed(void)
 #endif
 }
 
+static void mdy_stm_fbdev_power_done_cb(void *aptr, void *reply)
+{
+    // Note: this is executed in the main thread context
+    (void)reply;
+
+    bool poweron = GPOINTER_TO_INT(aptr);
+
+    mdy_waitfb_data.suspended = !poweron;
+
+    mce_log(LL_CRIT, "mdy_waitfb_data.suspended = %s",
+            mdy_waitfb_data.suspended ? "true" : "false");
+
+    mdy_stm_schedule_rethink();
+}
+
+static void *mdy_stm_fbdev_power_exec_cb(void *aptr)
+{
+    // Note: this is executed in the worker thread context
+    bool poweron = GPOINTER_TO_INT(aptr);
+
+    mce_log(LL_CRIT, "display.poweron = %s",
+            poweron ? "true" : "false");
+
+    mce_fbdev_set_power(poweron);
+    return aptr;
+}
+
+static void mdy_stm_fbdev_set_power(bool poweron)
+{
+    mce_worker_add_job(MODULE_NAME, "fbdev-ioctl",
+                       mdy_stm_fbdev_power_exec_cb,
+                       mdy_stm_fbdev_power_done_cb,
+                       GINT_TO_POINTER(poweron));
+}
+
 /** Start frame buffer suspend
  */
 static void mdy_stm_start_fb_suspend(void)
@@ -6426,8 +6462,10 @@ static void mdy_stm_start_fb_suspend(void)
 #ifdef ENABLE_WAKELOCKS
     mce_log(LL_NOTICE, "suspending");
     wakelock_allow_suspend();
-    if( !mdy_waitfb_data.thread )
-        mdy_waitfb_data.suspended = true, mce_fbdev_set_power(false);
+    if( !mdy_waitfb_data.thread ) {
+        //mdy_waitfb_data.suspended = true, mce_fbdev_set_power(false);
+        mdy_stm_fbdev_set_power(false);
+    }
 #else
     mce_log(LL_NOTICE, "power off frame buffer");
     mdy_waitfb_data.suspended = true, mce_fbdev_set_power(false);
@@ -6443,8 +6481,10 @@ static void mdy_stm_start_fb_resume(void)
 #ifdef ENABLE_WAKELOCKS
     mce_log(LL_NOTICE, "resuming");
     wakelock_block_suspend();
-    if( !mdy_waitfb_data.thread )
-        mdy_waitfb_data.suspended = false, mce_fbdev_set_power(true);
+    if( !mdy_waitfb_data.thread ) {
+        //mdy_waitfb_data.suspended = false, mce_fbdev_set_power(true);
+        mdy_stm_fbdev_set_power(true);
+    }
 #else
     mce_log(LL_NOTICE, "power off frame buffer");
     mdy_waitfb_data.suspended = false, mce_fbdev_set_power(true);
@@ -9309,6 +9349,8 @@ const gchar *g_module_check_init(GModule *module)
 
     (void)module;
 
+    mce_worker_add_context(MODULE_NAME);
+
     /* Initialise the display type and the relevant paths */
     (void)mdy_display_type_get();
 
@@ -9406,6 +9448,8 @@ void g_module_unload(GModule *module)
 
     /* Mark down that we are unloading */
     mdy_unloading_module = TRUE;
+
+    mce_worker_rem_context(MODULE_NAME);
 
     /* Kill the framebuffer sleep/wakeup thread */
 #ifdef ENABLE_WAKELOCKS
