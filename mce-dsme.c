@@ -31,6 +31,7 @@
 #include "mce-lib.h"
 #include "mce-conf.h"
 #include "mce-dbus.h"
+#include "mce-worker.h"
 
 #include <stdlib.h>
 #include <unistd.h>
@@ -257,6 +258,59 @@ static system_state_t mce_dsme_normalise_system_state(dsme_state_t dsmestate)
 }
 
 /* ========================================================================= *
+ * WORKER_WATCHDOG
+ * ========================================================================= */
+
+/** Number of worker jobs scheduled */
+static guint mce_dsme_worker_ping_cnt = 0;
+
+/** Number of worker jobs executed */
+static guint mce_dsme_worker_pong_cnt = 0;
+
+/** Number of worker jobs notified */
+static guint mce_dsme_worker_done_cnt = 0;
+
+static void mce_dsme_worker_done_cb(void *aptr, void *reply)
+{
+    (void)reply;
+
+    mce_dsme_worker_done_cnt = GPOINTER_TO_INT(aptr);
+
+    if( mce_dsme_worker_ping_cnt != mce_dsme_worker_pong_cnt ||
+        mce_dsme_worker_ping_cnt != mce_dsme_worker_done_cnt ) {
+        mce_log(LL_CRIT, "worker thread is misbehaving");
+    }
+}
+
+static void *mce_dsme_worker_pong_cb(void *aptr)
+{
+    // Note: this is executed in the worker thread context
+
+    mce_dsme_worker_pong_cnt = GPOINTER_TO_INT(aptr);
+
+    if( mce_dsme_worker_ping_cnt != mce_dsme_worker_pong_cnt ) {
+        mce_log(LL_CRIT, "worker thread is misbehaving");
+    }
+
+    return aptr;
+}
+
+static void mce_dsme_worker_ping(void)
+{
+    if( mce_dsme_worker_ping_cnt != mce_dsme_worker_pong_cnt ||
+        mce_dsme_worker_ping_cnt != mce_dsme_worker_done_cnt ) {
+        mce_log(LL_CRIT, "worker thread is possibly stuck");
+    }
+
+    mce_dsme_worker_ping_cnt += 1;
+
+    mce_worker_add_job("mce-dsme", "ping",
+                       mce_dsme_worker_pong_cb,
+                       mce_dsme_worker_done_cb,
+                       GINT_TO_POINTER(mce_dsme_worker_ping_cnt));
+}
+
+/* ========================================================================= *
  * PROCESS_WATCHDOG
  * ========================================================================= */
 
@@ -272,6 +326,9 @@ static void mce_dsme_processwd_pong(void)
 
     /* Send the message */
     mce_dsme_socket_send(&msg, "DSM_MSGTYPE_PROCESSWD_PONG");
+
+    /* Run worker thread sanity check */
+    mce_dsme_worker_ping();
 
     /* Execute hearbeat actions even if ping-pong ipc failed */
     execute_datapipe(&heartbeat_pipe, GINT_TO_POINTER(0),
@@ -915,6 +972,8 @@ static void mce_dsme_datapipe_quit(void)
  */
 gboolean mce_dsme_init(void)
 {
+    mce_worker_add_context("mce-dsme");
+
     mce_dsme_datapipe_init();
 
     mce_dsme_dbus_init();
@@ -926,6 +985,8 @@ gboolean mce_dsme_init(void)
  */
 void mce_dsme_exit(void)
 {
+    mce_worker_rem_context("mce-dsme");
+
     mce_dsme_dbus_quit();
 
     if( mce_dsme_socket_is_connected() )
