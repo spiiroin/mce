@@ -55,7 +55,9 @@
 #include <mce/dbus-names.h>
 #include <mce/mode-names.h>
 
-#include <libngf/ngf.h>
+#ifdef ENABLE_NGFD_SUPPORT
+# include <libngf/ngf.h>
+#endif
 
 /* ========================================================================= *
  * OVERVIEW
@@ -396,6 +398,7 @@ static void     pwrkey_double_press_timer_start(void);
  * NGFD_GLUE
  * ------------------------------------------------------------------------- */
 
+#ifdef ENABLE_NGFD_SUPPORT
 static const char *xngf_state_repr    (NgfEventState state);
 static void        xngf_status_cb     (NgfClient *client, uint32_t event_id, NgfEventState state, void *userdata);
 static bool        xngf_create_client (void);
@@ -403,6 +406,7 @@ static void        xngf_delete_client (void);
 static void        xngf_play_event    (const char *event_name);
 static void        xngf_init          (void);
 static void        xngf_quit          (void);
+#endif
 
 /* ------------------------------------------------------------------------- *
  * DBUS_ACTIONS
@@ -880,7 +884,9 @@ static void
 pwrkey_action_vibrate(void)
 {
     mce_log(LL_DEBUG, "Requesting vibrate");
+#ifdef ENABLE_NGFD_SUPPORT
     xngf_play_event("pwrkey");
+#endif
 }
 
 static void
@@ -3204,8 +3210,10 @@ pwrkey_datapipe_ngfd_service_state_cb(gconstpointer data)
             service_state_repr(prev),
             service_state_repr(ngfd_service_state));
 
+#ifdef ENABLE_NGFD_SUPPORT
     if( ngfd_service_state != SERVICE_STATE_RUNNING )
         xngf_delete_client();
+#endif
 
 EXIT:
     return;
@@ -3431,7 +3439,9 @@ static void pwrkey_datapipe_ngfd_event_request_cb(gconstpointer data)
 {
     const char *event = data;
     mce_log(LL_DEBUG, "ngfd event request = %s", event);
+#ifdef ENABLE_NGFD_SUPPORT
     xngf_play_event(event);
+#endif
 }
 
 /** Array of datapipe handlers */
@@ -3523,6 +3533,7 @@ pwrkey_datapipe_quit(void)
  * NGFD_GLUE
  * ========================================================================= */
 
+#ifdef ENABLE_NGFD_SUPPORT
 static NgfClient       *ngf_client_hnd = 0;
 static DBusConnection  *ngf_dbus_con   = 0;
 static uint32_t         ngf_event_id   = 0;
@@ -3642,6 +3653,7 @@ xngf_quit(void)
     if( ngf_dbus_con )
         dbus_connection_unref(ngf_dbus_con), ngf_dbus_con = 0;
 }
+#endif
 
 /* ------------------------------------------------------------------------- *
  * PWRKEY_QUEUED
@@ -4154,7 +4166,9 @@ gboolean mce_powerkey_init(void)
 
     pwrkey_setting_init();
 
+#ifdef ENABLE_NGFD_SUPPORT
     xngf_init();
+#endif
 
     pwrkey_queue_init();
 
@@ -4170,7 +4184,9 @@ void mce_powerkey_exit(void)
 {
     pwrkey_queue_quit();
 
+#ifdef ENABLE_NGFD_SUPPORT
     xngf_quit();
+#endif
 
     pwrkey_dbus_quit();
 

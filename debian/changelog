@@ -5664,7 +5664,7 @@ mce (1.8.0) unstable; urgency=low
     change the build-dependency accordingly
   * Temporarily work around missing cal.pc; hopefully it will be restored
     in the next version of libcal-dev
-  * Build-Depend on libdsme0.2.0-dev instead of libdsme0-dev
+  * Build-Depend on libdsme0.3.0-dev instead of libdsme0-dev
   * Adapt mce-dsme to new API
     | Thanks to Semi Malinen
   * Added RX-51 support to led.c

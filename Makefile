@@ -59,6 +59,8 @@ distclean:: clean
 
 VERSION := 1.115.11
 
+VARIANT ?= sailfish
+
 INSTALL_BIN := install --mode=755
 INSTALL_DIR := install -d
 INSTALL_DTA := install --mode=644
@@ -85,6 +87,13 @@ endif
 endif
 PKG_CONFIG   ?= pkg-config
 
+# Maemo-leste variant
+ifeq ($(strip $(VARIANT)),maemo-leste)
+ENABLE_NGFD_SUPPORT ?= n
+ENABLE_USB_MODED_SUPPORT ?= n
+ENABLE_SYSTEMD_SUPPORT ?= n
+endif
+
 # Whether to enable DEVEL release logging
 ENABLE_DEVEL_LOGGING ?= y
 
@@ -93,6 +102,12 @@ ENABLE_HYBRIS ?= y
 
 # Whether to enable wakelock compatibility code
 ENABLE_WAKELOCKS ?= y
+
+# Whether to enable ngfd functionality
+ENABLE_NGFD_SUPPORT ?= y
+
+# Whether to enable usb-moded functionality
+ENABLE_USB_MODED_SUPPORT ?= y
 
 # Whether to enable cpu scaling governor policy
 ENABLE_CPU_GOVERNOR ?= y
@@ -148,6 +163,7 @@ DBUS_GMAIN_DIR  := dbus-gmain
 
 # Binaries to build
 TARGETS += mce
+TARGETS += $(TOOLDIR)/dummy_compositor
 
 # Plugins to build
 MODULES += $(MODULE_DIR)/radiostates.so
@@ -168,7 +184,9 @@ MODULES += $(MODULE_DIR)/battery-statefs.so
 MODULES += $(MODULE_DIR)/battery-udev.so
 MODULES += $(MODULE_DIR)/buttonbacklight.so
 MODULES += $(MODULE_DIR)/display.so
+ifeq ($(ENABLE_USB_MODED_SUPPORT),y)
 MODULES += $(MODULE_DIR)/usbmode.so
+endif
 MODULES += $(MODULE_DIR)/doubletap.so
 MODULES += $(MODULE_DIR)/sensor-gestures.so
 MODULES += $(MODULE_DIR)/led.so
@@ -181,7 +199,6 @@ MODULES += $(MODULE_DIR)/packagekit.so
 # Tools to build
 TOOLS   += $(TOOLDIR)/mcetool
 TOOLS   += $(TOOLDIR)/evdev_trace
-TOOLS   += $(TOOLDIR)/dummy_compositor
 
 # Unit tests to build
 UTESTS  += $(UTESTDIR)/ut_display_conf
@@ -228,6 +245,18 @@ endif
 ifeq ($(ENABLE_DEVEL_LOGGING),y)
 CPPFLAGS += -DENABLE_DEVEL_LOGGING
 CPPFLAGS += -DENABLE_BATTERY_SIMULATION
+endif
+
+ifeq ($(strip $(ENABLE_SYSTEMD_SUPPORT)),y)
+CPPFLAGS += -DENABLE_SYSTEMD_SUPPORT
+endif
+
+ifeq ($(strip $(ENABLE_NGFD_SUPPORT)),y)
+CPPFLAGS += -DENABLE_NGFD_SUPPORT
+endif
+
+ifeq ($(strip $(ENABLE_USB_MODED_SUPPORT)),y)
+CPPFLAGS += -DENABLE_USB_MODED_SUPPORT
 endif
 
 # C Compiler
@@ -288,8 +317,12 @@ MCE_PKG_NAMES += gmodule-2.0
 MCE_PKG_NAMES += dbus-1
 MCE_PKG_NAMES += dsme
 MCE_PKG_NAMES += libiphb
+ifeq ($(strip $(ENABLE_SYSTEMD_SUPPORT)),y)
 MCE_PKG_NAMES += libsystemd
+endif
+ifeq ($(strip $(ENABLE_NGFD_SUPPORT)),y)
 MCE_PKG_NAMES += libngf0
+endif
 MCE_PKG_NAMES += thermalmanager_dbus_if
 
 MCE_PKG_CFLAGS := $(shell $(PKG_CONFIG) --cflags $(MCE_PKG_NAMES))
@@ -372,7 +405,9 @@ MODULE_PKG_NAMES += gobject-2.0
 MODULE_PKG_NAMES += glib-2.0
 MODULE_PKG_NAMES += gmodule-2.0
 MODULE_PKG_NAMES += dbus-1
+ifeq ($(ENABLE_USB_MODED_SUPPORT),y)
 MODULE_PKG_NAMES += usb_moded
+endif
 MODULE_PKG_NAMES += libudev
 
 MODULE_PKG_CFLAGS := $(shell $(PKG_CONFIG) --cflags $(MODULE_PKG_NAMES))
@@ -421,7 +456,9 @@ $(TOOLDIR)/dummy_compositor : $(TOOLDIR)/dummy_compositor.o $(DBUS_GMAIN_DIR)/db
 # UNIT TESTS
 # ----------------------------------------------------------------------------
 
+ifeq ($(strip $(VARIANT)),sailfish)
 UTESTS_PKG_NAMES += check
+endif
 UTESTS_PKG_NAMES += dbus-1
 UTESTS_PKG_NAMES += glib-2.0
 UTESTS_PKG_NAMES += gthread-2.0
@@ -472,13 +509,12 @@ ifeq ($(ENABLE_UNITTESTS_INSTALL),y)
 	$(RM) $(UTESTS)
 endif
 
-install:: build
+install_main:: $(TARGETS) $(MODULES)
 	$(INSTALL_DIR) $(DESTDIR)$(VARDIR)
 	$(INSTALL_DIR) $(DESTDIR)$(RUNDIR)
 
 	$(INSTALL_DIR) $(DESTDIR)$(_SBINDIR)
 	$(INSTALL_BIN) $(TARGETS) $(DESTDIR)$(_SBINDIR)/
-	$(INSTALL_BIN) $(TOOLS)   $(DESTDIR)$(_SBINDIR)/
 
 	$(INSTALL_DIR) $(DESTDIR)$(MODULEDIR)
 	$(INSTALL_BIN) $(MODULES) $(DESTDIR)$(MODULEDIR)/
@@ -495,6 +531,12 @@ install:: build
 	$(INSTALL_DTA) inifiles/als-defaults.ini $(DESTDIR)$(CONFDIR)/20als-defaults.ini
 	$(INSTALL_DTA) inifiles/evdev-types.ini $(DESTDIR)$(CONFDIR)/20evdev-types.ini
 	$(INSTALL_DTA) inifiles/legacy.ini $(DESTDIR)$(CONFDIR)/11legacy.ini
+
+install_tools: $(TOOLS)
+	$(INSTALL_DIR) $(DESTDIR)$(_SBINDIR)
+	$(INSTALL_BIN) $(TOOLS) $(DESTDIR)$(_SBINDIR)/
+
+install:: install_main install_tools
 
 ifeq ($(ENABLE_SYSTEMD_SUPPORT),y)
 install:: install_systemd_support

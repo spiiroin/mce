@@ -28,6 +28,9 @@
 #include "../mce-dbus.h"
 #include "../mce-wakelock.h"
 
+#include <string.h>
+#include <stdlib.h>
+
 #include <mce/dbus-names.h>
 #include <mce/mode-names.h>
 

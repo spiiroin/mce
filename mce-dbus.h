@@ -24,6 +24,8 @@
 #ifndef  MCE_DBUS_H_
 # define MCE_DBUS_H_
 
+# include "systemui/dbus-names.h"
+
 # include "builtin-gconf.h"
 
 # include <unistd.h>
@@ -121,9 +123,15 @@
  * ========================================================================= */
 
 /** Well known dbus name of systemui service */
+#if 0
 # define LIPSTICK_SERVICE                         "org.nemomobile.lipstick"
 # define LIPSTICK_PATH                            "/"
 # define LIPSTICK_IFACE                           "org.nemomobile.lipstick"
+#else
+# define LIPSTICK_SERVICE                         SYSTEMUI_SERVICE
+# define LIPSTICK_PATH                            SYSTEMUI_REQUEST_PATH
+# define LIPSTICK_IFACE                           SYSTEMUI_REQUEST_IF
+#endif
 
 /* ========================================================================= *
  * USB_MODED DBUS SERVICE

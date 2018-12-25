@@ -2,33 +2,14 @@
 # debian/rules for mce using debhelper.
 # Copyright © 2004-2011 Nokia Corporation and/or its subsidiary(-ies).
 
+# Override default variant in Makefile
+export VARIANT = maemo-leste
+
 # Uncomment this to turn on verbose mode.
 #export DH_VERBOSE=1
 
 # This has to be exported to make some magic below work.
 export DH_OPTIONS
-
-pkgdir = $(CURDIR)/debian/tmp
-
-makefileversion := $$(grep -m1 '^VERSION' Makefile | sed -e 's/VERSION *:= *//')
-changelogversion := $$(grep -m1 'mce (' debian/changelog | sed -e 's/mce (\(.*\)).*/\1/;s/\(^'$(makefileversion)'\).*/\1/')
-
-CC = gcc
-CFLAGS = -Wall -g
-LDFLAGS = -Wl,--as-needed
-MODULES_CFLAGS = $(CFLAGS) -DUSE_LIBCAL
-MODULES_LDFLAGS = $(LDFLAGS) $$(pkg-config libcal --libs)
-
-ifneq (,$(findstring noopt,$(DEB_BUILD_OPTIONS)))
-	CFLAGS += -O0
-else
-	CFLAGS += -O2
-endif
-
-# Use soft-float and thumb mode if enabled
-ifneq (,$(findstring thumb,$(DEB_BUILD_OPTIONS)))
-	CFLAGS += -mthumb
-endif
 
 .PHONY: clean
 clean:
@@ -36,25 +17,18 @@ clean:
 	dh_testroot
 	rm -f build-stamp
 
-	$(MAKE) distclean
+#	$(MAKE) distclean
 
 	dh_clean
 
 .PHONY: check
 check:
-	@if [ x"$(makefileversion)" != x"$(changelogversion)" ]; then \
-		printf "error: version-number mismatch\n"; \
-		printf "Makefile version: $(makefileversion)\n"; \
-		printf "changelog version: $(changelogversion)\n"; \
-		exit 1; \
-	fi
+	# verify debian, rpm, and Makefile agree on sw version
+	./verify_version
 
 build-stamp:
 	dh_testdir
-
-	$(MAKE) targets CC="$(CC)" CFLAGS="$(CFLAGS)" LDFLAGS="$(LDFLAGS)"
-	$(MAKE) modules CC="$(CC)" CFLAGS="$(MODULES_CFLAGS)" LDFLAGS="$(MODULES_LDFLAGS)"
-	$(MAKE) tools CC="$(CC)" CFLAGS="$(CFLAGS)" LDFLAGS="$(LDFLAGS)"
+	$(MAKE) -j6
 
 	touch build-stamp
 
@@ -67,7 +41,8 @@ install:
 	dh_testroot
 	dh_clean -k
 	dh_installdirs
-	$(MAKE) install DESTDIR="$(pkgdir)"
+	$(MAKE) install_main DESTDIR=debian/mce
+	$(MAKE) install_tools DESTDIR=debian/mcetools
 
 .PHONY: binary-indep
 binary-indep:
@@ -78,11 +53,13 @@ binary-arch: build install
 	dh_testdir
 	dh_testroot
 	dh_installdocs
-	dh_installman
+## QUARANTINE 	dh_installman
 	dh_installchangelogs
 	dh_install -s
-	dh_strip -pmce --dbg-package=mce-dbg
-	dh_strip -pmcetools --dbg-package=mcetools-dbg
+	dh_installinit
+	dh_installinit -r --no-start --name=zzinitdone -- start 99 2 3 4 5 . stop 00 0 1 2 3 4 5 6 .
+	dh_strip --package=mce --dbg-package=mce-dbg
+	dh_strip --package=mcetools --dbg-package=mcetools-dbg
 	dh_link
 	dh_compress
 	dh_fixperms

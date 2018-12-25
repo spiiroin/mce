@@ -57,7 +57,9 @@
 #include <errno.h>
 #include <fcntl.h>
 
-#include <systemd/sd-daemon.h>
+#ifdef ENABLE_SYSTEMD_SUPPORT
+# include <systemd/sd-daemon.h>
+#endif
 
 /** Path to the lockfile */
 #define MCE_LOCKFILE			"/var/run/mce.pid"
@@ -1133,8 +1135,12 @@ int main(int argc, char **argv)
 
 	/* Tell systemd that we have started up */
 	if( mce_args.systemd_notify ) {
+#ifdef ENABLE_SYSTEMD_SUPPORT
 		mce_log(LL_NOTICE, "notifying systemd");
 		sd_notify(0, "READY=1");
+#else
+		mce_log(LL_WARN, "systemd notify without systemd support");
+#endif
 	}
 	/* Debug feature: exit after startup is finished */
 	if( mce_args.auto_exit >= 0 ) {

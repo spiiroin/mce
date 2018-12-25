@@ -1,0 +1,29 @@
+#!/sbin/openrc-run
+
+description="This init script starts the mode control software used on the Maemo platform for Internet Tablets."
+name="Mode Control Entity."
+
+depend() {
+	need dsme dbus dbus-user
+}
+
+start_pre() {
+	ebegin "Starting mce"
+	RUNDIR=/var/run/mce
+	test -d $RUNDIR || (rm -f $RUNDIR; mkdir $RUNDIR)
+	/usr/sbin/waitdbus system
+## QUARANTINE 	. /tmp/session_bus_address.user
+## QUARANTINE 	/usr/sbin/waitdbus session
+}
+
+start() {
+	#/usr/sbin/dsmetool --nice=-1 --start-restart="/usr/sbin/mce"
+	# allow failing until it is known to start ok ...
+	/usr/sbin/dsmetool --nice=-1 --start-restart-fail="/usr/sbin/mce"
+}
+
+stop() {
+	eend "Stopping mce"
+	/usr/sbin/dsmetool --stop="/usr/sbin/mce"
+}
+
