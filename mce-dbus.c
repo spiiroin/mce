@@ -2137,10 +2137,12 @@ static struct
 	.name     = LIPSTICK_SERVICE,
 	.datapipe = &lipstick_service_state_pipe,
     },
+#if 0
     {
 	.name     = DEVICELOCK_SERVICE,
 	.datapipe = &devicelock_service_state_pipe,
     },
+#endif
     {
 	.name     = USB_MODED_DBUS_SERVICE,
 	.datapipe = &usbmoded_service_state_pipe,
