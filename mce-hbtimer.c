@@ -779,8 +779,13 @@ mht_iphb_set_wakeup(int64_t trigger, int64_t now)
     if( mht_iphb_wakeup_tick != tick ) {
         mht_iphb_wakeup_tick = tick;
 
+#if 0
         if( mht_connection_handle )
             iphb_wait2(mht_connection_handle, lo, hi, 0, 1);
+#else
+        if( mht_connection_handle )
+            iphb_wait(mht_connection_handle, lo, hi, 0);
+#endif
 
         mce_log(LL_DEBUG, "iphb wakeup in [%d, %d] s", lo, hi);
     }
