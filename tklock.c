@@ -381,8 +381,10 @@ static gboolean tklock_ui_sync_cb(gpointer aptr);
 static void     tklock_ui_notify_cancel(void);
 
 static void     tklock_ui_eat_event(void);
-static void     tklock_ui_open(void);
+static void     tklock_ui_open(tklock_mode mode);
 static void     tklock_ui_close(void);
+static void     tklock_ui_rethink(void);
+
 static bool     tklock_ui_is_enabled(void);
 static void     tklock_ui_set_enabled(bool enable);
 
@@ -1006,6 +1008,13 @@ static void tklock_datapipe_display_state_curr_cb(gconstpointer data)
 
     tklock_datapipe_rethink_interaction_expected();
 
+#if 0
+    // sailfish
+#else
+    // maemo
+    tklock_ui_rethink();
+#endif
+
     tklock_lidfilter_rethink_allow_close();
 
     /* Disable "wakeup with fake policy" hack
@@ -1042,6 +1051,13 @@ static void tklock_datapipe_display_state_next_cb(gconstpointer data)
 
     if( display_state_next == display_state_curr )
         goto EXIT;
+
+#if 0
+    // sailfish
+#else
+    // maemo
+    tklock_ui_rethink();
+#endif
 
     /* Cancel autorelock on display off */
     switch( display_state_next ) {
@@ -5733,26 +5749,43 @@ static void tklock_ui_eat_event(void)
               DBUS_TYPE_INVALID);
 }
 
-static void tklock_ui_open(void)
+static const char *tklock_mode_repr(tklock_mode mode)
+{
+    const char *repr = "TKLOCK_UNDEF";
+    switch( mode ) {
+    case TKLOCK_NONE:           repr = "TKLOCK_NONE";           break;
+    case TKLOCK_ENABLE:         repr = "TKLOCK_ENABLE";         break;
+    case TKLOCK_HELP:           repr = "TKLOCK_HELP";           break;
+    case TKLOCK_SELECT:         repr = "TKLOCK_SELECT";         break;
+    case TKLOCK_ONEINPUT:       repr = "TKLOCK_ONEINPUT";       break;
+    case TKLOCK_ENABLE_VISUAL:  repr = "TKLOCK_ENABLE_VISUAL";  break;
+    case TKLOCK_ENABLE_LPM_UI:  repr = "TKLOCK_ENABLE_LPM_UI";  break;
+    case TKLOCK_PAUSE_UI:       repr = "TKLOCK_PAUSE_UI";       break;
+    default: break;
+    }
+    return repr;
+}
+
+static void tklock_ui_open(tklock_mode mode)
 {
     const char   *cb_service   = MCE_SERVICE;
     const char   *cb_path      = MCE_REQUEST_PATH;
     const char   *cb_interface = MCE_REQUEST_IF;
     const char   *cb_method    = MCE_TKLOCK_CB_REQ;
-    dbus_bool_t   flicker_key  = has_flicker_key;
-    dbus_uint32_t mode         = TKLOCK_ENABLE_VISUAL;
+    dbus_uint32_t mode_arg     = mode;
     dbus_bool_t   silent       = TRUE;
+    dbus_bool_t   flicker_key  = has_flicker_key;
 
     mce_log(LL_DEBUG, "sending tklock ui open");
     /* org.nemomobile.lipstick.screenlock.tklock_open */
     dbus_send(SYSTEMUI_SERVICE, SYSTEMUI_REQUEST_PATH,
               SYSTEMUI_REQUEST_IF, SYSTEMUI_TKLOCK_OPEN_REQ,
               NULL,
-              DBUS_TYPE_STRING, &cb_service,
-              DBUS_TYPE_STRING, &cb_path,
-              DBUS_TYPE_STRING, &cb_interface,
-              DBUS_TYPE_STRING, &cb_method,
-              DBUS_TYPE_UINT32, &mode,
+              DBUS_TYPE_STRING,  &cb_service,
+              DBUS_TYPE_STRING,  &cb_path,
+              DBUS_TYPE_STRING,  &cb_interface,
+              DBUS_TYPE_STRING,  &cb_method,
+              DBUS_TYPE_UINT32,  &mode_arg,
               DBUS_TYPE_BOOLEAN, &silent,
               DBUS_TYPE_BOOLEAN, &flicker_key,
               DBUS_TYPE_INVALID);
@@ -5771,6 +5804,53 @@ static void tklock_ui_close(void)
               DBUS_TYPE_INVALID);
 }
 
+static void tklock_ui_rethink(void)
+{
+    static int prev = -1;
+    int mode = -1;
+
+    if( lipstick_service_state == SERVICE_STATE_RUNNING ) {
+        if( tklock_ui_notified ) {
+            if( display_state_next == MCE_DISPLAY_ON ||
+                display_state_next == MCE_DISPLAY_DIM ) {
+                /* Display is on / powering up */
+                mode = TKLOCK_ENABLE_VISUAL;
+            }
+            else if( display_state_curr == MCE_DISPLAY_ON ||
+                     display_state_curr == MCE_DISPLAY_DIM ) {
+                /* Display is powering down */
+                mode = prev;
+            }
+            else {
+                /* Display is off */
+                mode = TKLOCK_ENABLE;
+            }
+// QUARANTINE       switch( display_state_curr ) {
+// QUARANTINE             default:
+// QUARANTINE                 mode = TKLOCK_ENABLE;
+// QUARANTINE                 break;
+// QUARANTINE             case MCE_DISPLAY_ON:
+// QUARANTINE             case MCE_DISPLAY_DIM:
+// QUARANTINE                 break;
+// QUARANTINE             }
+        }
+        else {
+            mode = TKLOCK_NONE;
+        }
+    }
+
+    if( prev != mode ) {
+        mce_log(LL_WARN, "tklock_mode: %s -> %s",
+                tklock_mode_repr(prev),
+                tklock_mode_repr(mode));
+        prev = mode;
+        if( mode == TKLOCK_NONE )
+            tklock_ui_close();
+        else if( mode != -1 )
+            tklock_ui_open(mode);
+    }
+}
+
 static guint tklock_ui_notify_end_id = 0;
 static guint tklock_ui_notify_beg_id = 0;
 
@@ -5783,13 +5863,18 @@ static void tklock_ui_send_tklock_signal(void)
 
     tklock_ui_notified = current;
 
+#if 0
     /* do lipstick specific ipc */
     if( lipstick_service_state == SERVICE_STATE_RUNNING ) {
         if( current )
-            tklock_ui_open();
+            tklock_ui_open(TKLOCK_ENABLE_VISUAL);
         else
             tklock_ui_close();
     }
+#else
+    // maemo
+    tklock_ui_rethink();
+#endif
 
     /* broadcast signal */
     tklock_dbus_send_tklock_mode(0);

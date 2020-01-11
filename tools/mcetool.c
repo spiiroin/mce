@@ -6667,7 +6667,7 @@ static void xmce_get_fake_doubletap(void)
 /** Lookup table for tklock open values
  */
 static const symbol_t tklock_open_values[] = {
-#if 0 // DEPRECATED
+#if 01 // DEPRECATED
         { "none",     TKLOCK_NONE },
         { "enable",   TKLOCK_ENABLE },
         { "help",     TKLOCK_HELP },
@@ -7343,7 +7343,9 @@ static const mce_opt_t options[] =
                 .name        = "tklock-open",
                 .flag        = 'q',
                 .with_arg    = xmce_tklock_open,
-                .values      = "oneinput|visual|lpm|pause",
+                .values      = "oneinput|visual|lpm|pause"
+                               "(|none|enable|help|select)",
+
                 .usage       =
                         "simulate tklock open from mce\n"
         },
