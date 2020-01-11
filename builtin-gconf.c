@@ -2140,7 +2140,10 @@ static int gconf_client_glob_error_cb(const char *path, int err)
  */
 static void gconf_client_load_overrides(GConfClient *self)
 {
-  static const char pattern[] = MCE_CONF_DIR"/[0-9][0-9]*.conf";
+  //static const char pattern[] = MCE_CONF_DIR"/[0-9][0-9]*.conf";
+  gchar *pattern = 0;
+  const char *env = getenv("MCE_CONF_DIR") ?: MCE_CONF_DIR;
+  pattern = g_strdup_printf("%s/[0-9][0-9]*.conf", env);
 
   glob_t gb;
 
@@ -2160,6 +2163,7 @@ static void gconf_client_load_overrides(GConfClient *self)
 
 cleanup:
   globfree(&gb);
+  g_free(pattern);
 }
 
 /** Set default value state based on the current data

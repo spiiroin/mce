@@ -28,6 +28,7 @@
 #include "mce-conf.h"
 
 #include <stdio.h>
+#include <stdlib.h>
 
 #include <gmodule.h>
 
@@ -164,9 +165,14 @@ gboolean mce_modules_init(void)
 	gchar *path = NULL;
 
 	/* Get the module path */
-	path = mce_conf_get_string(MCE_CONF_MODULES_GROUP,
-				   MCE_CONF_MODULES_PATH,
-				   DEFAULT_MCE_MODULE_PATH);
+	const char *env = getenv("MCE_MODULE_DIR");
+	if( env )
+		path = g_strdup(env);
+
+	if( !path )
+		path = mce_conf_get_string(MCE_CONF_MODULES_GROUP,
+					   MCE_CONF_MODULES_PATH,
+					   DEFAULT_MCE_MODULE_PATH);
 
 	/* Get the list modules to load */
 	modlist = mce_conf_get_string_list(MCE_CONF_MODULES_GROUP,

@@ -325,9 +325,17 @@ static char *mce_hybris_module_path(void)
   gchar *module_dir = 0;
   char *module_path = 0;
 
-  module_dir = mce_conf_get_string(MCE_CONF_MODULES_GROUP,
-                                   MCE_CONF_MODULES_PATH,
-                                   DEFAULT_MCE_MODULE_PATH);
+  const char *env = getenv("MCE_MODULE_DIR");
+  if( env ) {
+    module_dir = g_strdup(env);
+  }
+
+  if( !module_dir ) {
+    module_dir = mce_conf_get_string(MCE_CONF_MODULES_GROUP,
+                                     MCE_CONF_MODULES_PATH,
+                                     DEFAULT_MCE_MODULE_PATH);
+  }
+
   if( !module_dir ) {
     goto EXIT;
   }

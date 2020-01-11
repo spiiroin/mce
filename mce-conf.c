@@ -29,6 +29,7 @@
 #include "modules/led.h"
 
 #include <string.h>
+#include <stdlib.h>
 #include <glob.h>
 
 /** Pointer to the keyfile structure where config values are read from */
@@ -420,7 +421,11 @@ static int mce_conf_glob_error_cb(const char *path, int err)
  */
 static GKeyFile *mce_conf_read_ini_files(void)
 {
-	static const char pattern[] = MCE_CONF_DIR"/[0-9][0-9]*.ini";
+	gchar *pattern = 0;
+	const char *env = getenv("MCE_CONF_DIR") ?: MCE_CONF_DIR;
+	pattern = g_strdup_printf("%s/[0-9][0-9]*.ini", env);
+
+// QUARANTINE 	static const char pattern[] = MCE_CONF_DIR"/[0-9][0-9]*.ini";
 
 	GKeyFile *ini = g_key_file_new();
 	glob_t    gb;
@@ -451,6 +456,7 @@ static GKeyFile *mce_conf_read_ini_files(void)
 
 EXIT:
 	globfree(&gb);
+	g_free(pattern);
 
 	return ini;
 }
