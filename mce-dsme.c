@@ -35,6 +35,7 @@
 
 #include <stdlib.h>
 #include <unistd.h>
+#include <stdint.h>
 
 #include <dsme/state.h>
 #include <dsme/protocol.h>
@@ -366,6 +367,13 @@ static void mce_dsme_processwd_pong(void)
 
     /* Send the message */
     mce_dsme_socket_send(&msg);
+
+#if 01
+    /* legacy line protocol */
+    uint32_t *v = (void *)&msg;
+    v[2] = 0x000000504;
+    mce_dsme_socket_send(&msg);
+#endif
 
     /* Run worker thread sanity check */
     mce_dsme_worker_ping();
