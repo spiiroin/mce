@@ -36,6 +36,13 @@
 #include <fcntl.h>
 #include <errno.h>
 
+
+/* Can /dev/fb0 ioctls be used */
+#define ENABLE_HYBRIS_FRAMEBUFFER 0
+
+/* Can android hal framebuffer controls be used */
+#define ENABLE_FRAMEBUFFER_DEVICE 0
+
 /* ========================================================================= *
  * CONSTANTS
  * ========================================================================= */
@@ -82,6 +89,7 @@ bool mce_fbdev_open(void)
         goto EXIT;
 #endif
 
+#if ENABLE_FRAMEBUFFER_DEVICE
     if( mce_fbdev_handle != -1 )
         goto EXIT;
 
@@ -97,6 +105,9 @@ bool mce_fbdev_open(void)
     }
 
     mce_log(LL_DEBUG, "frame buffer device opened");
+#else
+    mce_log(LL_WARN, "frame buffer device use disabled");
+#endif
 
 EXIT:
     return mce_fbdev_handle != -1;
@@ -286,10 +297,12 @@ void mce_fbdev_init(void)
         mce_log(LL_NOTICE, "using ioctl for fb power control");
     }
 #ifdef ENABLE_HYBRIS
+# if ENABLE_HYBRIS_FRAMEBUFFER
     else if( mce_hybris_framebuffer_init() ) {
         mce_log(LL_NOTICE, "using libhybris for fb power control");
         fbdev_use_hybris = true;
     }
+# endif
 #endif
     else {
         mce_log(LL_WARN, "no fb power control available");;
