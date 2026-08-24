@@ -115,6 +115,7 @@ systemctl daemon-reload || :
 %license COPYING debian/copyright
 %{_sbindir}/mcetool
 %{_sbindir}/evdev_trace
+%{_sbindir}/fake_inputdev
 
 %files tests
 ## QUARANTINE /opt/tests/mce/*
