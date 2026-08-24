@@ -1612,3 +1612,9 @@ tools/mcetool.pic.o:\
 	systemui/tklock-dbus-names.h\
 	tklock.h\
 
+tools/fake_inputdev.o:\
+	tools/fake_inputdev.c\
+
+tools/fake_inputdev.pic.o:\
+	tools/fake_inputdev.c\
+

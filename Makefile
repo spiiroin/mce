@@ -182,6 +182,7 @@ MODULES += $(MODULE_DIR)/packagekit.so
 TOOLS   += $(TOOLDIR)/mcetool
 TOOLS   += $(TOOLDIR)/evdev_trace
 TOOLS   += $(TOOLDIR)/dummy_compositor
+TOOLS   += $(TOOLDIR)/fake_inputdev
 
 # Unit tests to build
 UTESTS  += $(UTESTDIR)/ut_display_conf
@@ -416,6 +417,10 @@ $(TOOLDIR)/evdev_trace : $(TOOLDIR)/evdev_trace.o evdev.o $(TOOLDIR)/fileusers.o
 $(TOOLDIR)/dummy_compositor : CFLAGS += $(TOOLS_CFLAGS)
 $(TOOLDIR)/dummy_compositor : LDLIBS += $(TOOLS_LDLIBS)
 $(TOOLDIR)/dummy_compositor : $(TOOLDIR)/dummy_compositor.o $(DBUS_GMAIN_DIR)/dbus-gmain.o
+
+$(TOOLDIR)/fake_inputdev : CFLAGS += $(TOOLS_CFLAGS)
+$(TOOLDIR)/fake_inputdev : LDLIBS += $(TOOLS_LDLIBS)
+$(TOOLDIR)/fake_inputdev : $(TOOLDIR)/fake_inputdev.o $(DBUS_GMAIN_DIR)/dbus-gmain.o
 
 # ----------------------------------------------------------------------------
 # UNIT TESTS
@@ -663,6 +668,7 @@ NORMALIZE_USES_SPC =\
 	tools/mcetool.c\
 	tools/fileusers.c\
 	tools/fileusers.h\
+	tools/fake_inputdev.c\
 
 NORMALIZE_USES_TAB =\
 	event-switches.c\
